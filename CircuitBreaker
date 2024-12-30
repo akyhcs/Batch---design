@@ -1,0 +1,43 @@
+@Component
+public class Application1Tasklet implements Tasklet {
+
+    @Autowired
+    private Application1Service application1Service;
+
+    @Autowired
+    private CircuitBreaker circuitBreaker;
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+        try {
+            // Circuit breaker wraps the service call
+            circuitBreaker.executeCallable(() -> {
+                application1Service.processData();
+                return null; // Return type for Callable
+            });
+            System.out.println("Application 1 Tasklet executed successfully.");
+        } catch (CallNotPermittedException ex) {
+            System.err.println("Circuit Breaker Open: System 1 is unavailable.");
+            // Handle fallback logic if needed
+        } catch (Exception ex) {
+            System.err.println("Application 1 Tasklet failed: " + ex.getMessage());
+            throw ex;
+        }
+        return RepeatStatus.FINISHED;
+    }
+}
+...................................................................................................................................
+@Configuration
+public class CircuitBreakerConfig {
+
+    @Bean
+    public CircuitBreaker circuitBreaker() {
+        CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+            .failureRateThreshold(50) // Open if 50% of calls fail
+            .waitDurationInOpenState(Duration.ofSeconds(30)) // Wait before retrying
+            .slidingWindowSize(10) // Evaluate the last 10 calls
+            .build();
+
+        return CircuitBreaker.of("application1CircuitBreaker", config);
+    }
+}
