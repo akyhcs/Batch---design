@@ -1,0 +1,48 @@
+@Component
+public class Application1Tasklet implements Tasklet {
+
+    @Autowired
+    private Application1Service application1Service;
+
+    @Autowired
+    private RetryTemplate retryTemplate;
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+        try {
+            // Retry logic for processing data
+            retryTemplate.execute(context -> {
+                application1Service.processData();
+                return null; // Required for RetryTemplate's lambda
+            });
+            System.out.println("Application 1 Tasklet executed successfully.");
+        } catch (Exception ex) {
+            System.err.println("Application 1 Tasklet failed after retries: " + ex.getMessage());
+            throw ex; // Let Spring Batch handle job failure
+        }
+        return RepeatStatus.FINISHED;
+    }
+}
+_------------__++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++±++++++++
+@Configuration
+public class RetryConfig {
+
+    @Bean
+    public RetryTemplate retryTemplate() {
+        RetryTemplate retryTemplate = new RetryTemplate();
+
+        // Configure retry policy (e.g., max attempts: 3)
+        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy();
+        retryPolicy.setMaxAttempts(3);
+
+        // Configure backoff policy (e.g., exponential backoff)
+        ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
+        backOffPolicy.setInitialInterval(1000); // 1 second
+        backOffPolicy.setMultiplier(2.0);      // Double the delay each retry
+        backOffPolicy.setMaxInterval(10000);   // Max 10 seconds
+
+        retryTemplate.setRetryPolicy(retryPolicy);
+        retryTemplate.setBackOffPolicy(backOffPolicy);
+        return retryTemplate;
+    }
+}
