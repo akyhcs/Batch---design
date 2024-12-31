@@ -1,0 +1,9 @@
+@Autowired
+private JobLauncher jobLauncher;
+
+@Autowired
+private Job movieProcessingJob;
+
+public void restartJob(JobParameters jobParameters) throws Exception {
+    jobLauncher.run(movieProcessingJob, jobParameters);
+}
