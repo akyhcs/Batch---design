@@ -1,0 +1,25 @@
+@Autowired
+private JobOperator jobOperator;
+
+public void restartFailedJob(Long executionId) throws Exception {
+    jobOperator.restart(executionId);
+}
+
+++++++++++++++++++++++++++++++++++++++++++++++++++±+++++++++++++++++++++++++++++++++++++++++++++++++
+@Autowired
+private JobLauncher jobLauncher;
+
+@Autowired
+private Job movieProcessingJob;
+
+public void restartStep(JobParameters jobParameters, String stepName) throws Exception {
+    jobLauncher.run(movieProcessingJob, new JobParametersBuilder(jobParameters)
+            .addString("restartStep", stepName) // Pass the step to restart
+            .toJobParameters());
+}
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+SELECT * FROM BATCH_STEP_EXECUTION WHERE STATUS = 'FAILED';
+
+SELECT * FROM BATCH_JOB_EXECUTION WHERE STATUS = 'FAILED';
+SELECT * FROM BATCH_STEP_EXECUTION WHERE STATUS = 'FAILED';
+++++++±+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
