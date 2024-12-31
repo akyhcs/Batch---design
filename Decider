@@ -1,0 +1,34 @@
+@Component
+public class StepDecider implements JobExecutionDecider {
+
+    @Override
+    public FlowExecutionStatus decide(JobExecution jobExecution, StepExecution stepExecution) {
+        // Check Step 1's execution status
+        StepExecution step1Execution = jobExecution.getStepExecutions().stream()
+                .filter(se -> se.getStepName().equals("step1"))
+                .findFirst()
+                .orElse(null);
+
+        if (step1Execution == null || step1Execution.getStatus() == BatchStatus.FAILED) {
+            System.out.println("Step 1 failed. Skipping Step 2.");
+            return new FlowExecutionStatus("SKIP");
+        }
+
+        System.out.println("Step 1 succeeded. Proceeding to Step 2.");
+        return new FlowExecutionStatus("CONTINUE");
+    }
+}
+
+
+
+
+--------------------
+@Bean
+public Job movieProcessingJob(Step step1, Step step2, StepDecider stepDecider) {
+    return jobBuilderFactory.get("movieProcessingJob")
+            .start(step1)
+            .next(stepDecider) // Add decider after Step 1
+            .from(stepDecider).on("CONTINUE").to(step2) // Proceed to Step 2 if Step 1 succeeds
+            .from(stepDecider).on("SKIP").end() // Skip Step 2 if Step 1 fails
+            .build();
+}
