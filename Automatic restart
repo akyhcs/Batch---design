@@ -1,0 +1,186 @@
+No, you do not need to manually invoke the failed step in Spring Batch. Spring Batch automatically manages step retries and restarts for failed jobs or steps, provided the following conditions are met:
+
+
+---
+
+Automatic Step Retry on Failure
+
+Spring Batch automatically retries failed steps if:
+
+1. Retry Logic is Configured:
+
+Use .faultTolerant() with .retry() in the step configuration to enable retries.
+
+Example:
+
+@Bean
+public Step step1(Tasklet step1Tasklet) {
+    return stepBuilderFactory.get("step1")
+            .tasklet(step1Tasklet)
+            .faultTolerant()
+            .retry(Exception.class) // Retry for transient errors
+            .retryLimit(3) // Maximum retry attempts
+            .build();
+}
+
+If the step fails during retries, the job will fail.
+
+
+
+2. Job Restart is Enabled:
+
+Spring Batch automatically skips completed steps and retries only the failed step when the job is restarted.
+
+Ensure restartable = true (default behavior).
+
+
+
+
+
+---
+
+Example: Automatic Retry Flow
+
+First Job Run:
+
+1. Step 1: Succeeds.
+
+
+2. Step 2: Fails after exhausting retries.
+
+
+
+Restart Job:
+
+1. Spring Batch skips Step 1 (status = COMPLETED).
+
+
+2. Spring Batch reruns Step 2 (status = FAILED).
+
+
+
+You do not need to manually invoke the failed step during the restart.
+
+
+---
+
+Manual Step Invocation (Optional)
+
+If you want to run only a specific failed step manually without restarting the entire job, you can use the JobOperator to invoke it explicitly.
+
+Using JobOperator to Restart a Specific Step
+
+You can restart a specific failed step programmatically:
+
+@Autowired
+private JobOperator jobOperator;
+
+public void restartFailedStep(Long stepExecutionId) throws Exception {
+    jobOperator.restart(stepExecutionId);
+}
+
+In this case:
+
+You identify the stepExecutionId from the JobRepository.
+
+Restart only that step, leaving other steps untouched.
+
+
+
+---
+
+Best Practices
+
+1. Let Spring Batch Handle Retries and Restarts Automatically:
+
+Use ExecutionContext to store the state for incomplete steps.
+
+Configure fault tolerance and retries for transient failures.
+
+
+
+2. Monitor Job Status:
+
+Use the Spring Batch tables (BATCH_JOB_EXECUTION, BATCH_STEP_EXECUTION) to track which steps have failed.
+
+
+
+3. Restart Jobs When Necessary:
+
+Restart the entire job (Spring Batch skips completed steps).
+
+Only manually invoke a failed step in exceptional cases.
+
+
+
+
+
+---
+
+Code Example: Full Automatic Flow
+
+Step Configuration with Fault Tolerance:
+
+@Bean
+public Step step1(Tasklet step1Tasklet) {
+    return stepBuilderFactory.get("step1")
+            .tasklet(step1Tasklet)
+            .faultTolerant()
+            .retry(Exception.class) // Retry on transient errors
+            .retryLimit(3) // Retry up to 3 times
+            .build();
+}
+
+@Bean
+public Step step2(Tasklet step2Tasklet) {
+    return stepBuilderFactory.get("step2")
+            .tasklet(step2Tasklet)
+            .faultTolerant()
+            .retry(Exception.class) // Retry on transient errors
+            .retryLimit(3) // Retry up to 3 times
+            .build();
+}
+
+Job Restart Handling:
+
+Spring Batch automatically skips completed steps.
+
+Failed steps are retried when you restart the job:
+
+
+@Autowired
+private JobLauncher jobLauncher;
+
+@Autowired
+private Job movieProcessingJob;
+
+public void restartJob(JobParameters jobParameters) throws Exception {
+    jobLauncher.run(movieProcessingJob, jobParameters);
+}
+
+
+---
+
+Advantages of Automatic Retry and Restart
+
+1. No Manual Step Invocation:
+
+Spring Batch handles retries and restarts automatically.
+
+
+
+2. Improved Efficiency:
+
+Skips successful steps during job restarts.
+
+
+
+3. Error Isolation:
+
+Retries only transient failures without affecting the entire job.
+
+
+
+
+Let me know if you need further clarification!
+
