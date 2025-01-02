@@ -1,4 +1,15 @@
+@Bean
+public JobLauncher taskExecutorJobLauncher(JobRepository jobRepository) {
+    TaskExecutorJobLauncher jobLauncher = new TaskExecutorJobLauncher();
+    jobLauncher.setJobRepository(jobRepository);
 
+    // Inline TaskExecutor with customization
+    SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor();
+    executor.setThreadNamePrefix("CustomExecutor-");
+    jobLauncher.setTaskExecutor(executor);
+
+    return jobLauncher;
+}
 The TaskExecutorJobLauncher has been deprecated and replaced with DefaultJobLauncher in Spring Batch 5.1.2. However, if you want to explicitly use TaskExecutorJobLauncher, you can re-enable it by defining the required class in your configuration.
 
 Here’s how you can configure and use it:
