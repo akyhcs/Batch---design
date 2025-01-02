@@ -1,230 +1,169 @@
-The JobLauncher in Spring Batch is a component responsible for launching jobs. It is used to start a job by passing the job instance and
-associated parameters. The JobLauncher provides the entry point for triggering batch jobs programmatically.
+
+The TaskExecutorJobLauncher has been deprecated and replaced with DefaultJobLauncher in Spring Batch 5.1.2. However, if you want to explicitly use TaskExecutorJobLauncher, you can re-enable it by defining the required class in your configuration.
+
+Here’s how you can configure and use it:
 
 
 ---
 
-JobLauncher Basics
+1. Defining TaskExecutorJobLauncher
 
-1. Interface:
+Since TaskExecutorJobLauncher is not available out-of-the-box in newer Spring Batch versions, you can extend the SimpleJobLauncher class to recreate the TaskExecutorJobLauncher behavior.
 
-The JobLauncher interface provides the run() method to start a job.
+Custom Implementation of TaskExecutorJobLauncher:
 
+import org.springframework.batch.core.launch.support.SimpleJobLauncher;
+import org.springframework.core.task.TaskExecutor;
 
-JobExecution run(Job job, JobParameters jobParameters) throws JobExecutionAlreadyRunningException,
-        JobRestartException, JobInstanceAlreadyCompleteException, JobParametersInvalidException;
+public class TaskExecutorJobLauncher extends SimpleJobLauncher {
 
+    private TaskExecutor taskExecutor;
 
-2. Responsibilities:
+    public void setTaskExecutor(TaskExecutor taskExecutor) {
+        this.taskExecutor = taskExecutor;
+        super.setTaskExecutor(taskExecutor);
+    }
 
-Start a new job instance or restart a failed job.
-
-Accept JobParameters to uniquely identify and manage job instances.
-
-
-
-
-
----
-
-Using JobLauncher
-
-1. Injecting JobLauncher
-
-Spring Batch provides a default JobLauncher bean that can be autowired into your application.
-
-@Autowired
-private JobLauncher jobLauncher;
-
-@Autowired
-private Job job;
-
-
----
-
-2. Launching a Job
-
-Example Code:
-
-public void launchJob() {
-    JobParameters jobParameters = new JobParametersBuilder()
-            .addString("timestamp", String.valueOf(System.currentTimeMillis())) // Unique parameter
-            .toJobParameters();
-
-    try {
-        JobExecution jobExecution = jobLauncher.run(job, jobParameters);
-        System.out.println("Job Status: " + jobExecution.getStatus());
-    } catch (JobExecutionAlreadyRunningException | JobRestartException |
-             JobInstanceAlreadyCompleteException | JobParametersInvalidException e) {
-        System.err.println("Job failed to start: " + e.getMessage());
+    public TaskExecutor getTaskExecutor() {
+        return this.taskExecutor;
     }
 }
 
-Explanation:
 
-1. Create JobParameters to uniquely identify the job instance.
+---
 
+2. Configure TaskExecutorJobLauncher
 
-2. Call the run() method of JobLauncher to start the job.
+Now, use the custom TaskExecutorJobLauncher in your configuration with a TaskExecutor bean.
 
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-3. Handle exceptions for scenarios like:
+@Configuration
+public class BatchConfig {
 
-The job is already running (JobExecutionAlreadyRunningException).
+    @Bean
+    public JobLauncher taskExecutorJobLauncher(JobRepository jobRepository, TaskExecutor taskExecutor) {
+        TaskExecutorJobLauncher jobLauncher = new TaskExecutorJobLauncher();
+        jobLauncher.setJobRepository(jobRepository);
+        jobLauncher.setTaskExecutor(taskExecutor);
+        return jobLauncher;
+    }
 
-The job cannot be restarted (JobRestartException).
-
-The job instance is already complete (JobInstanceAlreadyCompleteException).
-
-Invalid parameters (JobParametersInvalidException).
-
-
-
+    @Bean
+    public TaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(25);
+        executor.setThreadNamePrefix("BatchJob-");
+        executor.initialize();
+        return executor;
+    }
+}
 
 
 ---
 
-3. Triggering a Job from a REST API
+3. Using TaskExecutorJobLauncher
 
-You can trigger a Spring Batch job using a REST API endpoint.
+You can now autowire the JobLauncher and use it to run jobs asynchronously.
 
-Controller Example:
+Service Example
 
-@RestController
-@RequestMapping("/batch")
-public class JobController {
+@Service
+public class JobLaunchService {
 
     @Autowired
     private JobLauncher jobLauncher;
 
     @Autowired
-    private Job job;
+    private Job sampleJob;
 
-    @PostMapping("/start")
-    public ResponseEntity<String> startJob(@RequestParam String parameter) {
-        JobParameters jobParameters = new JobParametersBuilder()
-                .addString("param", parameter)
-                .addLong("timestamp", System.currentTimeMillis()) // Unique parameter
-                .toJobParameters();
+    public String launchJob(Map<String, String> params) {
+        JobParameters jobParameters = buildJobParameters(params);
 
         try {
-            JobExecution jobExecution = jobLauncher.run(job, jobParameters);
-            return ResponseEntity.ok("Job started successfully with status: " + jobExecution.getStatus());
+            JobExecution jobExecution = jobLauncher.run(sampleJob, jobParameters);
+            return "Job launched successfully with status: " + jobExecution.getStatus();
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Job failed to start: " + e.getMessage());
+            return "Failed to launch job: " + e.getMessage();
         }
+    }
+
+    private JobParameters buildJobParameters(Map<String, String> params) {
+        JobParametersBuilder builder = new JobParametersBuilder();
+
+        // Add parameters dynamically
+        params.forEach(builder::addString);
+
+        // Add a timestamp to ensure uniqueness
+        builder.addLong("timestamp", System.currentTimeMillis());
+
+        return builder.toJobParameters();
     }
 }
 
-Explanation:
-
-1. Expose an API endpoint (/batch/start) to start the job.
-
-
-2. Pass job parameters (e.g., from query parameters) to make the job unique.
-
-
-3. Use JobLauncher.run() to start the job and return the status.
-
-
-
 
 ---
 
-Customizing the JobLauncher
+4. Controller Example
 
-You can customize the JobLauncher by providing your own bean definition.
+Expose an endpoint to trigger the job.
 
-Example of a Custom JobLauncher:
+@RestController
+@RequestMapping("/jobs")
+public class JobController {
 
-@Bean
-public JobLauncher customJobLauncher(JobRepository jobRepository) {
-    SimpleJobLauncher jobLauncher = new SimpleJobLauncher();
-    jobLauncher.setJobRepository(jobRepository); // Link JobRepository
-    jobLauncher.setTaskExecutor(new SimpleAsyncTaskExecutor()); // Async Execution
-    return jobLauncher;
+    @Autowired
+    private JobLaunchService jobLaunchService;
+
+    @PostMapping("/launch")
+    public ResponseEntity<String> launchJob(@RequestParam Map<String, String> params) {
+        String response = jobLaunchService.launchJob(params);
+        if (response.startsWith("Failed")) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+        return ResponseEntity.ok(response);
+    }
 }
 
-Features:
 
-1. Async Execution:
+---
 
-Use SimpleAsyncTaskExecutor to execute jobs asynchronously.
+5. Testing the Configuration
+
+Run the API
+
+curl -X POST "http://localhost:8080/jobs/launch?param1=value1&param2=value2"
+
+Expected Logs
+
+The TaskExecutorJobLauncher will use the ThreadPoolTaskExecutor to run jobs asynchronously.
+
+2023-12-30 12:00:00.000  INFO  --- [BatchJob-1] Executing step...
+2023-12-30 12:00:00.500  INFO  --- [BatchJob-2] Executing step...
 
 
+---
 
-2. Custom JobRepository:
+6. Alternatives
 
-Attach a custom JobRepository for advanced job management.
+If you're working with Spring Batch 5.1.2:
 
+Prefer using DefaultJobLauncher, as it provides the same functionality as TaskExecutorJobLauncher.
 
+TaskExecutor can still be configured with DefaultJobLauncher.
 
 
 
 ---
 
-JobLauncher Exceptions
+Key Differences
 
-1. JobExecutionAlreadyRunningException:
+Let me know if you need further clarification or assistance!
 
-Thrown if you try to start a job that is already running.
-
-
-
-2. JobRestartException:
-
-Thrown if a job cannot be restarted due to invalid state or configuration.
-
-
-
-3. JobInstanceAlreadyCompleteException:
-
-Thrown if the job instance is already complete and cannot be restarted.
-
-
-
-4. JobParametersInvalidException:
-
-Thrown if the job parameters are invalid.
-
-
-
-
-
----
-
-Best Practices
-
-1. Unique Job Parameters:
-
-Always use unique job parameters to create a new job instance (e.g., add a timestamp).
-
-
-
-2. Monitoring:
-
-Use Spring Batch metadata tables (BATCH_JOB_EXECUTION) to track job executions.
-
-
-
-3. Asynchronous Execution:
-
-Use an asynchronous JobLauncher if jobs are time-consuming and shouldn't block the main thread.
-
-
-
-
-
----
-
-Summary
-
-The JobLauncher is the entry point for programmatically triggering jobs in Spring Batch.
-
-Use run() to start jobs with unique parameters.
-
-Customize the JobLauncher for advanced scenarios like asynchronous execution.
-
-
-Let me know if you need further details!
 
