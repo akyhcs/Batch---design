@@ -176,5 +176,26 @@ Launch the job as usual.
 
 ---
 
-This solution ensures that only one instance of a job runs at a time and prevents duplicate or overlapping executions. Let me know if you need further assistance!
+This solution ensures that only one instance of a job runs at a time and prevents
+duplicate or overlapping executions. Let me know if you need further assistance!
+,.........,..............,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,.,,,.,,........................,.,
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.batch.core.explore.support.SimpleJobExplorer;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.repository.dao.ExecutionContextDao;
+import org.springframework.batch.core.repository.dao.JobExecutionDao;
+import org.springframework.batch.core.repository.dao.JobInstanceDao;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
+@Configuration
+public class BatchConfig {
+
+    @Bean
+    public JobExplorer jobExplorer(JobRepository jobRepository,
+                                   JobInstanceDao jobInstanceDao,
+                                   JobExecutionDao jobExecutionDao,
+                                   ExecutionContextDao executionContextDao) {
+        return new SimpleJobExplorer(jobInstanceDao, jobExecutionDao, executionContextDao, jobRepository);
+    }
+}
