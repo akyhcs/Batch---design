@@ -63,7 +63,7 @@ public class AsyncController {
 
     @GetMapping("/async")
     public String triggerAsyncTask() {
-        asyncService.performAsyncTask();
+        asyncService.performAsyncTask();// executed on seperate thread
         return "Task execution started!";
     }
 }
