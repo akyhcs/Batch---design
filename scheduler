@@ -1,0 +1,27 @@
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+public class APIService {
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
+    public void startAPIScheduler() {
+        scheduler.scheduleAtFixedRate(() -> {
+            // Call your API here
+            System.out.println("Invoking API...");
+
+        }, 0, 1, TimeUnit.MINUTES);
+    }
+
+    public void stopAPIScheduler() {
+        scheduler.shutdown();
+    }
+
+    public static void main(String[] args) {
+        APIService apiService = new APIService();
+        apiService.startAPIScheduler();
+
+        // To stop the scheduler after a certain time or condition
+        // apiService.stopAPIScheduler();
+    }
+}
