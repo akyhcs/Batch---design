@@ -1,0 +1,116 @@
+Yes, JobExplorer can be used for multiple jobs!
+
+It allows querying any Spring Batch job stored in the Spring Batch metadata tables (BATCH_JOB_EXECUTION). You can use it to check the running status of multiple jobs by providing the job name dynamically.
+
+
+---
+
+Using JobExplorer for Multiple Jobs
+
+You can modify the isJobRunning method to check the status of any job dynamically.
+
+Example: Check If Any Job Is Running
+
+@Component
+public class JobMonitor {
+
+    @Autowired
+    private JobExplorer jobExplorer;
+
+    public boolean isJobRunning(String jobName) {
+        List<JobInstance> jobInstances = jobExplorer.findJobInstancesByJobName(jobName, 0, 1);
+        if (!jobInstances.isEmpty()) {
+            JobInstance lastJobInstance = jobInstances.get(0);
+            List<JobExecution> executions = jobExplorer.getJobExecutions(lastJobInstance);
+            return executions.stream().anyMatch(exec -> exec.isRunning());
+        }
+        return false;
+    }
+}
+
+Example: Check Multiple Jobs Before Running
+
+@Component
+public class JobScheduler {
+
+    @Autowired
+    private JobLauncher jobLauncher;
+
+    @Autowired
+    private JobExplorer jobExplorer;
+
+    @Autowired
+    private Job messageProcessingJob;
+
+    @Autowired
+    private Job retryProcessingJob;
+
+    @Scheduled(fixedRate = 300000) // Every 5 minutes
+    public void runJobs() {
+        if (isAnyJobRunning("messageProcessingJob", "retryProcessingJob")) {
+            System.out.println("One of the jobs is already running. Skipping execution.");
+            return;
+        }
+
+        try {
+            JobParameters params = new JobParametersBuilder()
+                    .addLong("time", System.currentTimeMillis())
+                    .toJobParameters();
+            jobLauncher.run(messageProcessingJob, params);
+            jobLauncher.run(retryProcessingJob, params);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private boolean isAnyJobRunning(String... jobNames) {
+        for (String jobName : jobNames) {
+            if (isJobRunning(jobName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isJobRunning(String jobName) {
+        List<JobInstance> jobInstances = jobExplorer.findJobInstancesByJobName(jobName, 0, 1);
+        if (!jobInstances.isEmpty()) {
+            JobInstance lastJobInstance = jobInstances.get(0);
+            List<JobExecution> executions = jobExplorer.getJobExecutions(lastJobInstance);
+            return executions.stream().anyMatch(exec -> exec.isRunning());
+        }
+        return false;
+    }
+}
+
+
+---
+
+How It Works
+
+✅ isJobRunning(jobName): Checks if a specific job is running.
+✅ isAnyJobRunning(jobNames...): Checks multiple jobs and returns true if any are running.
+✅ Scheduler prevents duplicate executions of both jobs.
+
+Example Output
+
+If one job is already running, the scheduler skips execution:
+
+One of the jobs is already running. Skipping execution.
+
+
+---
+
+Final Answer
+
+Yes, JobExplorer supports multiple jobs. You can:
+
+Use it to check any number of jobs.
+
+Prevent duplicate execution of multiple jobs.
+
+Customize logic to run one job while another is still running (if needed).
+
+
+Would you like to add job priority logic (e.g., only run retryJob if messageProcessingJob is done)? 🚀
+
