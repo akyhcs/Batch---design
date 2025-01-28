@@ -1,0 +1,204 @@
+Optimized Pessimistic Locking in Spring Boot for High-Load Batch Processing
+
+This implementation will: ✅ Prevent data inconsistency when multiple pods process records.
+✅ Optimize locking performance to avoid deadlocks and contention.
+✅ Improve scalability for high-concurrency environments.
+
+
+---
+
+1. Setup: Entity, Repository & Indexing
+
+Step 1: Define the Entity with Indexing
+
+import javax.persistence.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Entity
+@Data
+@Table(name = "records", indexes = {@Index(name = "idx_status", columnList = "status")})
+public class Record {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String data;
+    
+    @Column(nullable = false)
+    private String status; // PENDING, PROCESSING, COMPLETED, FAILED
+
+    @Version
+    private Integer version; // For Optimistic Locking
+
+    private LocalDateTime createdAt;
+}
+
+✔ Indexes status to speed up WHERE status = 'PENDING'.
+✔ @Version allows Optimistic Locking as a fallback.
+
+
+---
+
+Step 2: Repository with Pessimistic Locking and SKIP LOCKED
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import javax.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
+import java.util.List;
+
+public interface RecordRepository extends JpaRepository<Record, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(value = "SELECT r FROM Record r WHERE r.status = 'PENDING' ORDER BY r.createdAt ASC")
+    List<Record> findPendingRecords(Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(value = "SELECT * FROM records WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 100", nativeQuery = true)
+    List<Record> findPendingRecordsSkipLocked();
+}
+
+✔ Uses PESSIMISTIC_WRITE to prevent concurrent updates.
+✔ FOR UPDATE SKIP LOCKED ensures multiple pods don’t block each other.
+✔ Pagination (optional) to process limited records per batch.
+
+
+---
+
+2. Batch Processing Logic
+
+Step 3: Transactional Batch Processing
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
+import javax.persistence.PessimisticLockException;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class BatchProcessor {
+
+    private final RecordRepository recordRepository;
+
+    @Transactional(timeout = 30) // Auto-aborts if transaction exceeds 30 seconds
+    @Retryable(value = {PessimisticLockException.class}, maxAttempts = 3, backoff = @Backoff(delay = 500))
+    public void processBatch() {
+        List<Record> records = recordRepository.findPendingRecordsSkipLocked();
+
+        for (Record record : records) {
+            processSingleRecord(record);
+        }
+    }
+
+    @Transactional
+    public void processSingleRecord(Record record) {
+        record.setStatus("PROCESSING");
+        recordRepository.save(record);
+
+        try {
+            sendToSystemB(record);
+            record.setStatus("COMPLETED");
+        } catch (Exception e) {
+            record.setStatus("FAILED");
+        }
+
+        recordRepository.save(record);
+    }
+
+    private void sendToSystemB(Record record) {
+        // External system processing logic
+    }
+}
+
+✔ Short transactions reduce lock time (@Transactional(timeout = 30)).
+✔ Retry on lock failure (@Retryable(maxAttempts = 3)).
+✔ Commit after each record (processSingleRecord) to prevent long locks.
+
+
+---
+
+3. Scheduled Batch Execution
+
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
+
+@Component
+@RequiredArgsConstructor
+public class BatchScheduler {
+
+    private final BatchProcessor batchProcessor;
+
+    @Scheduled(fixedRate = 300000) // Every 5 minutes
+    public void runBatch() {
+        batchProcessor.processBatch();
+    }
+}
+
+✔ Runs every 5 minutes, ensuring continuous data processing.
+
+
+---
+
+4. Transaction Isolation & Deadlock Prevention
+
+Step 4: Configure Transaction Isolation Level
+
+Modify application.yml:
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/mydb
+    username: myuser
+    password: mypassword
+  jpa:
+    properties:
+      hibernate:
+        connection:
+          isolation: READ_COMMITTED # Prevents deadlocks
+        jdbc:
+          batch_size: 20 # Optimizes batch processing
+
+✔ Uses READ_COMMITTED instead of SERIALIZABLE to reduce contention.
+✔ Batch size prevents excessive row locking.
+
+
+---
+
+5. Monitoring & Debugging
+
+Step 5: Enable Logging
+
+Modify application.yml:
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG # Show executed SQL queries
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # Show query parameters
+
+✔ Logs SQL queries to monitor locking behavior.
+
+
+---
+
+Final Summary
+
+
+---
+
+Final Recommendation
+
+Since multiple pods are running: ✔ Use FOR UPDATE SKIP LOCKED for parallel processing.
+✔ Set a timeout for transactions to avoid long locks.
+✔ Index status column to improve query speed.
+✔ Monitor deadlocks with logging (SQL=DEBUG).
+
+Would you like a complete working GitHub project with this implementation?
+
