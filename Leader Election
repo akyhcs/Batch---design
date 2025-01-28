@@ -1,0 +1,275 @@
+Leader Election with External API-Triggered Batch Job Execution in OpenShift
+
+Since your batch job is not scheduled internally, but triggered via an external API call, we need to ensure: ✔ Only the elected leader handles API requests and executes the batch job.
+✔ Other pods reject execution requests to prevent duplicate job runs.
+✔ If the leader pod crashes, a new pod becomes the leader and accepts future API calls.
+
+
+---
+
+1. Strategy: Leader-Exclusive API Execution
+
+1. Use Kubernetes Lease API for leader election.
+
+
+2. Expose a REST API (/trigger-batch) to trigger job execution.
+
+
+3. Only the leader pod responds to API calls and executes the job.
+
+
+4. Non-leader pods return HTTP 503 - Service Unavailable.
+
+
+5. If the leader pod crashes, another pod automatically takes over and starts accepting API calls.
+
+
+
+
+---
+
+2. Implementation Steps
+
+Step 1: Modify LeaderElectionListener to Control API Access
+
+Modify your service to only allow execution on the leader pod.
+
+import org.springframework.cloud.kubernetes.commons.leader.LeaderEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.web.bind.annotation.*;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
+
+@Controller
+@RequestMapping("/batch")
+@RequiredArgsConstructor
+public class BatchController {
+
+    private boolean isLeader = false;
+    private final BatchProcessor batchProcessor; // Inject batch processing logic
+
+    @EventListener
+    public void handleLeaderEvent(LeaderEvent event) {
+        isLeader = event.isLeader();
+        if (isLeader) {
+            System.out.println("This pod is now the leader.");
+        } else {
+            System.out.println("This pod is NOT the leader.");
+        }
+    }
+
+    @PostMapping("/trigger")
+    public ResponseEntity<String> triggerBatch() {
+        if (!isLeader) {
+            return ResponseEntity.status(503).body("This pod is not the leader. Try another instance.");
+        }
+
+        batchProcessor.processBatch();
+        return ResponseEntity.ok("Batch job executed by leader.");
+    }
+}
+
+✔ API Endpoint: POST /batch/trigger
+✔ Only the leader pod executes the batch job.
+✔ Other pods return 503 - Service Unavailable.
+
+
+---
+
+Step 2: Implement Batch Processing Logic
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class BatchProcessor {
+
+    private final RecordRepository recordRepository;
+
+    @Transactional
+    public void processBatch() {
+        List<Record> records = recordRepository.findPendingRecordsSkipLocked();
+
+        for (Record record : records) {
+            processSingleRecord(record);
+        }
+    }
+
+    @Transactional
+    public void processSingleRecord(Record record) {
+        record.setStatus("PROCESSING");
+        recordRepository.save(record);
+
+        try {
+            sendToSystemB(record);
+            record.setStatus("COMPLETED");
+        } catch (Exception e) {
+            record.setStatus("FAILED");
+        }
+
+        recordRepository.save(record);
+    }
+
+    private void sendToSystemB(Record record) {
+        // Business logic to send data to System B
+    }
+}
+
+✔ Processes only available records using SKIP LOCKED to avoid conflicts.
+✔ Executes only if the leader pod receives the API call.
+
+
+---
+
+Step 3: Deploy in OpenShift with Leader Election
+
+Modify Deployment YAML
+
+Ensure that all pods participate in leader election, but only the leader handles API calls.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-job
+  namespace: my-namespace
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: batch-job
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: batch-container
+        image: my-registry/batch-job:latest
+        ports:
+          - containerPort: 8080
+        env:
+        - name: SPRING_CLOUD_KUBERNETES_LEADER_LEASE_ENABLED
+          value: "true"
+        - name: SPRING_PROFILES_ACTIVE
+          value: "openshift"
+
+✔ All pods participate in leader election, but only the leader serves API requests.
+✔ Kubernetes automatically re-elects a leader if the active leader crashes.
+
+
+---
+
+3. How It Works
+
+1. An external API client (or another service) calls POST /batch/trigger.
+
+
+2. Only the leader pod responds with 200 OK and executes the batch job.
+
+
+3. Non-leader pods reject requests with 503 - Service Unavailable.
+
+
+4. If the leader pod crashes:
+
+Kubernetes elects a new leader.
+
+The new leader starts accepting API calls.
+
+
+
+
+
+---
+
+4. Verifying Leader Election
+
+Check Current Leader Pod
+
+oc get leases -n my-namespace
+
+✔ Shows the pod that currently holds the leader lease.
+
+Check Logs for Leadership Changes
+
+oc logs -l app=batch-job
+
+✔ Logs will show:
+
+This pod is the leader.
+
+✔ If the leader changes, logs will update accordingly.
+
+
+---
+
+5. Testing the API
+
+Test API on the Leader Pod
+
+Find the leader pod:
+
+oc get pods -l app=batch-job -o wide
+
+Send an API request to trigger the batch job:
+
+curl -X POST http://<leader-pod-ip>:8080/batch/trigger
+
+✔ Expected response:
+
+{
+    "message": "Batch job executed by leader."
+}
+
+Test API on a Non-Leader Pod
+
+Find a non-leader pod:
+
+oc get pods -l app=batch-job -o wide
+
+Send an API request to a non-leader pod:
+
+curl -X POST http://<non-leader-pod-ip>:8080/batch/trigger
+
+❌ Expected response:
+
+{
+    "error": "This pod is not the leader. Try another instance."
+}
+
+
+---
+
+6. Handling Failover
+
+✔ If the leader pod crashes, Kubernetes will elect a new leader.
+✔ The new leader automatically starts accepting API calls.
+✔ No need for manual intervention.
+
+
+---
+
+7. Alternative Approach: Kubernetes Service for Leader Routing
+
+If you don’t want to manage leader election logic in your app, Kubernetes can automatically route API calls to the leader.
+
+1. Label the leader pod dynamically.
+
+
+2. Expose a service that only routes to the leader.
+
+
+3. Use Kubernetes endpoints to direct traffic to the active leader.
+
+
+
+✅ This eliminates the need for 503 responses in non-leader pods.
+Would you like this alternative routing solution implemented?
+
