@@ -1,0 +1,126 @@
+Using Pessimistic Locking in JPA (Spring Boot)
+
+To implement pessimistic locking in Spring Boot with JPA, we use the @Lock annotation with LockModeType.PESSIMISTIC_WRITE. 
+This ensures that when a record is read, it locks the row, preventing other transactions from modifying it until the first 
+transaction completes.
+
+
+---
+
+1. Implementation Steps
+
+Step 1: Add Pessimistic Locking in Repository
+
+Modify your repository to use pessimistic locking when fetching records:
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+
+import javax.persistence.LockModeType;
+import java.util.List;
+
+public interface RecordRepository extends JpaRepository<Record, Long> {
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Record r WHERE r.status = 'PENDING'")
+    List<Record> findPendingRecords();
+}
+
+✅ Explanation:
+
+@Lock(LockModeType.PESSIMISTIC_WRITE): Prevents other transactions from updating these rows while they are locked.
+
+@Query("SELECT r FROM Record r WHERE r.status = 'PENDING'"): Fetches only pending records.
+
+
+
+---
+
+Step 2: Process Records in a Transaction
+
+In your batch job, retrieve and update records within a single transaction:
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class BatchProcessor {
+    private final RecordRepository recordRepository;
+
+    @Transactional
+    public void processBatch() {
+        List<Record> records = recordRepository.findPendingRecords();
+
+        for (Record record : records) {
+            record.setStatus("PROCESSING");  // Lock is acquired here
+            recordRepository.save(record);
+
+            try {
+                sendToSystemB(record);
+                record.setStatus("COMPLETED");
+            } catch (Exception e) {
+                record.setStatus("FAILED");
+            }
+
+            recordRepository.save(record);  // Lock is released after commit
+        }
+    }
+
+    private void sendToSystemB(Record record) {
+        // Business logic to send data to System B
+    }
+}
+
+✅ Key Points:
+
+@Transactional ensures pessimistic locks are held until commit.
+
+Other transactions must wait for locks to be released.
+
+If one pod locks a record, other pods cannot process it until it is released.
+
+
+
+---
+
+3. Alternative: Using PESSIMISTIC_WRITE with SKIP LOCKED
+
+If multiple pods are processing records simultaneously, use SKIP LOCKED so that only free records are picked.
+
+✅ Modify the Repository Query:
+
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query(value = "SELECT * FROM records WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED", nativeQuery = true)
+List<Record> findPendingRecordsSkipLocked();
+
+✅ Why Use SKIP LOCKED?
+
+Prevents pods from waiting for locked records.
+
+Allows parallel processing across multiple pods.
+
+
+
+---
+
+4. Comparison of Locking Modes
+
+
+---
+
+5. Final Recommendation
+
+Since you have multiple pods running the batch job:
+
+✅ Use PESSIMISTIC_WRITE if strict locking is required.
+
+✅ Use PESSIMISTIC_WRITE + SKIP LOCKED if parallel processing is needed.
+
+
+Would you like help with performance tuning for high-load scenarios?
+
