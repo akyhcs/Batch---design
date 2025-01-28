@@ -1,0 +1,274 @@
+Full Implementation: Preventing Concurrent Job Executions in Leader Pod
+
+This implementation ensures that: ✔ Only the leader pod executes the batch job.
+✔ Prevents multiple jobs from running simultaneously (if the previous job is still in progress).
+✔ Uses a database lock (PostgreSQL/MySQL) to track job execution.
+✔ Alternative Redis-based distributed lock provided.
+
+
+---
+
+1. Database Locking Approach (Recommended)
+
+Step 1: Create Lock Table in Database
+
+Create a table to track job execution state.
+
+CREATE TABLE batch_job_lock (
+    id SERIAL PRIMARY KEY,
+    job_name VARCHAR(255) UNIQUE NOT NULL,
+    is_running BOOLEAN NOT NULL DEFAULT FALSE,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+✔ Ensures only one job runs at a time.
+
+
+---
+
+Step 2: Define JPA Entity for Lock Table
+
+import javax.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "batch_job_lock")
+public class JobLock {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true, nullable = false)
+    private String jobName;
+
+    @Column(nullable = false)
+    private boolean isRunning;
+
+    private LocalDateTime lastUpdated;
+
+    public JobLock() {}
+
+    public JobLock(String jobName, boolean isRunning, LocalDateTime lastUpdated) {
+        this.jobName = jobName;
+        this.isRunning = isRunning;
+        this.lastUpdated = lastUpdated;
+    }
+
+    // Getters and setters
+}
+
+✔ Represents the lock status of the batch job.
+
+
+---
+
+Step 3: Create JPA Repository for Lock Table
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.Optional;
+
+public interface JobLockRepository extends JpaRepository<JobLock, Long> {
+
+    Optional<JobLock> findByJobName(String jobName);
+
+    @Transactional
+    @Modifying
+    @Query("UPDATE JobLock j SET j.isRunning = :status WHERE j.jobName = :jobName")
+    void updateJobStatus(String jobName, boolean status);
+}
+
+✔ Finds the lock before executing a job.
+✔ Updates the lock status before and after execution.
+
+
+---
+
+Step 4: Implement Locking Logic in Service
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+public class JobLockService {
+    
+    private final JobLockRepository jobLockRepository;
+
+    public JobLockService(JobLockRepository jobLockRepository) {
+        this.jobLockRepository = jobLockRepository;
+    }
+
+    @Transactional
+    public boolean tryAcquireLock(String jobName) {
+        Optional<JobLock> lock = jobLockRepository.findByJobName(jobName);
+        if (lock.isPresent() && lock.get().isRunning()) {
+            return false; // Job already running
+        }
+        jobLockRepository.save(new JobLock(jobName, true, LocalDateTime.now()));
+        return true;
+    }
+
+    @Transactional
+    public void releaseLock(String jobName) {
+        jobLockRepository.updateJobStatus(jobName, false);
+    }
+}
+
+✔ Prevents a new job from starting if one is already running.
+✔ Releases the lock after job completion.
+
+
+---
+
+Step 5: Modify Batch API to Check Lock Before Execution
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/batch")
+public class BatchController {
+
+    private final JobLockService jobLockService;
+    private final BatchProcessor batchProcessor;
+    private boolean isLeader = false;
+
+    public BatchController(JobLockService jobLockService, BatchProcessor batchProcessor) {
+        this.jobLockService = jobLockService;
+        this.batchProcessor = batchProcessor;
+    }
+
+    @PostMapping("/trigger")
+    public ResponseEntity<String> triggerBatch() {
+        if (!isLeader) {
+            return ResponseEntity.status(503).body("This pod is not the leader. Try another instance.");
+        }
+
+        if (!jobLockService.tryAcquireLock("batchJob")) {
+            return ResponseEntity.status(429).body("A job is already running. Try again later.");
+        }
+
+        try {
+            batchProcessor.processBatch();
+            return ResponseEntity.ok("Batch job executed by leader.");
+        } finally {
+            jobLockService.releaseLock("batchJob");
+        }
+    }
+}
+
+✔ If a job is already running, returns HTTP 429 - Too Many Requests.
+✔ Ensures only one job runs at a time.
+
+
+---
+
+2. Alternative: Redis-Based Distributed Locking
+
+If you prefer low-latency, distributed locking, use Redis.
+
+Step 1: Add Redis Configuration in application.yml
+
+spring:
+  redis:
+    host: my-redis-service
+    port: 6379
+
+Step 2: Implement Redis-Based Locking
+
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.stereotype.Service;
+
+@Service
+public class DistributedLockService {
+
+    private final RedissonClient redissonClient;
+
+    public DistributedLockService(RedissonClient redissonClient) {
+        this.redissonClient = redissonClient;
+    }
+
+    public boolean tryAcquireLock() {
+        RLock lock = redissonClient.getLock("batch-job-lock");
+        return lock.tryLock();
+    }
+
+    public void releaseLock() {
+        RLock lock = redissonClient.getLock("batch-job-lock");
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+        }
+    }
+}
+
+✔ Uses Redis locks to synchronize job execution across pods.
+
+Step 3: Modify the Batch API to Use Redis Lock
+
+@PostMapping("/batch/trigger")
+public ResponseEntity<String> triggerBatch() {
+    if (!isLeader) {
+        return ResponseEntity.status(503).body("This pod is not the leader. Try another instance.");
+    }
+
+    if (!distributedLockService.tryAcquireLock()) {
+        return ResponseEntity.status(429).body("A job is already running. Try again later.");
+    }
+
+    try {
+        batchProcessor.processBatch();
+        return ResponseEntity.ok("Batch job executed by leader.");
+    } finally {
+        distributedLockService.releaseLock();
+    }
+}
+
+✔ If the job is running, rejects new execution requests with 429.
+
+
+---
+
+3. Final Comparison: Database vs Redis Locking
+
+
+---
+
+4. How to Deploy
+
+1. Apply Database Migration (For SQL Locking)
+
+psql -U myuser -d mydb -f batch_job_lock.sql
+
+OR
+
+mysql -u myuser -p mydb < batch_job_lock.sql
+
+2. Deploy in OpenShift
+
+Convert Jsonnet files to YAML and apply:
+
+jsonnet -J vendor deployment.jsonnet | oc apply -f -
+jsonnet -J vendor rbac.jsonnet | oc apply -f -
+
+3. Verify Locking Works
+
+Run multiple requests:
+
+curl -X POST http://<leader-pod-ip>:8080/batch/trigger
+
+✔ First request: Job runs
+✔ Second request (if job is still running): Returns 429 Too Many Requests
+
+
+---
+
+5. Next Steps
+
+Would
+
