@@ -1,0 +1,149 @@
+Handling Records of the Same Status Across Different Time Frames
+
+The challenge here is not about processing different statuses, but rather ensuring that records with the same status (e.g., "RECEIVED")
+are processed correctly across different time frames.
+
+Our objective:
+✅ Main Job should only process freshly received "RECEIVED" records.
+✅ Retry Job should pick up older "RECEIVED" records that were not processed due to a failure.
+✅ Ensure no record is processed simultaneously by both jobs.
+
+
+---
+
+1. Solution Approach
+
+To properly segment the records based on time frames, we will:
+
+1. Modify the Main Job to process only recent "RECEIVED" records (e.g., last 5 minutes).
+
+
+2. Modify the Retry Job to process only older "RECEIVED" records (older than 5 minutes) + "FAILED" records.
+
+
+3. Use row-level locking to ensure no conflicts between the two jobs.
+
+
+
+
+---
+
+2. Updating the Database Schema
+
+We need to ensure that records can be processed in distinct time frames by adding:
+
+created_at TIMESTAMP → To determine when the record was created.
+
+locked_by VARCHAR(50) → To prevent race conditions.
+
+
+ALTER TABLE records ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE records ADD COLUMN locked_by VARCHAR(50) DEFAULT NULL;
+
+
+---
+
+3. Modifying the Jobs
+
+Step 1: Modify the Main Job to Process Only Fresh "RECEIVED" Records
+
+The Main Job should only process newly received records that arrived within the last 5 minutes.
+
+@Bean
+public Tasklet processRecentReceivedRecords() {
+    return (StepContribution contribution, ChunkContext chunkContext) -> {
+        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(5);
+        List<Record> records = recordRepository.findRecentReceivedRecords("MAIN_JOB", cutoffTime);
+
+        for (Record record : records) {
+            boolean sentSuccessfully = sendToSystemB(record);
+            record.setLockedBy(null); // Release lock after processing
+            updateRecordStatus(record, sentSuccessfully);
+        }
+        return RepeatStatus.FINISHED;
+    };
+}
+
+
+---
+
+Step 2: Modify the Retry Job to Process Older "RECEIVED" + "FAILED" Records
+
+The Retry Job should process: ✅ "FAILED" records.
+✅ "RECEIVED" records that are older than 5 minutes.
+
+@Bean
+public Tasklet retryFailedOrStuckRecords() {
+    return (StepContribution contribution, ChunkContext chunkContext) -> {
+        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(5);
+        List<Record> retryRecords = recordRepository.findOldReceivedOrFailedRecords("RETRY_JOB", cutoffTime);
+
+        for (Record record : retryRecords) {
+            int retryCount = record.getRetryCount();
+            boolean sentSuccessfully = false;
+
+            if (retryCount < 3) {
+                sentSuccessfully = sendToSystemB(record);
+                record.setRetryCount(retryCount + 1);
+            }
+
+            record.setLockedBy(null); // Release lock after processing
+            updateRetryStatus(record, sentSuccessfully);
+        }
+        return RepeatStatus.FINISHED;
+    };
+}
+
+
+---
+
+4. Updating the Repository
+
+We need to filter records based on time frame and status.
+
+Fetch Only Fresh "RECEIVED" Records for Main Job
+
+@Query("SELECT r FROM Record r WHERE r.status = 'RECEIVED' AND r.createdAt >= :cutoffTime " +
+       "AND (r.lockedBy IS NULL OR r.lockedBy = :jobName)")
+List<Record> findRecentReceivedRecords(String jobName, LocalDateTime cutoffTime);
+
+✔ Ensures the Main Job processes only recent records.
+
+
+---
+
+Fetch Older "RECEIVED" + "FAILED" Records for Retry Job
+
+@Query("SELECT r FROM Record r WHERE (r.status = 'FAILED' OR (r.status = 'RECEIVED' AND r.createdAt < :cutoffTime)) " +
+       "AND (r.lockedBy IS NULL OR r.lockedBy = :jobName)")
+List<Record> findOldReceivedOrFailedRecords(String jobName, LocalDateTime cutoffTime);
+
+✔ Ensures the Retry Job processes only old or failed records.
+
+
+---
+
+5. Summary of Changes
+
+
+---
+
+6. Expected Behavior in Failure Scenarios
+
+
+---
+
+7. Why This Works
+
+✅ Ensures proper segmentation of records by time frame.
+✅ Allows both jobs to run in parallel without conflicts.
+✅ Prevents job execution failures from leaving unprocessed records.
+✅ Ensures messages are retried without duplication or infinite loops.
+
+
+---
+
+8. Next Steps
+
+🚀 Would you like to integrate monitoring (Slack, Prometheus, Grafana) to track retries and failures?
+
