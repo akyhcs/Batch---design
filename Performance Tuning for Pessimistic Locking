@@ -1,0 +1,198 @@
+Performance Tuning for Pessimistic Locking in High-Load Scenarios
+
+When multiple pods are processing data concurrently, pessimistic locking can lead to performance bottlenecks. Here’s how you can optimize performance while ensuring data consistency.
+
+
+---
+
+1. Key Performance Bottlenecks in Pessimistic Locking
+
+1. High Lock Contention
+
+Multiple pods competing for locks cause delays.
+
+
+
+2. Increased Database Deadlocks
+
+Locks block other transactions, leading to deadlocks.
+
+
+
+3. Slow Query Execution
+
+Full-table scans on large tables reduce performance.
+
+
+
+4. Retry Overhead in Case of Conflicts
+
+Transactions fail and retry, increasing system load.
+
+
+
+
+
+---
+
+2. Optimization Strategies
+
+A. Optimize Query Execution
+
+✅ Index Frequently Queried Columns
+
+Ensure indexes exist on the status column:
+
+
+CREATE INDEX idx_status ON records(status);
+
+✔ Why?
+
+Queries like SELECT * FROM records WHERE status = 'PENDING' are much faster.
+
+
+✅ Use Pagination (LIMIT) to Reduce Locks
+
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("SELECT r FROM Record r WHERE r.status = 'PENDING' ORDER BY r.createdAt ASC")
+List<Record> findPendingRecords(Pageable pageable);
+
+✔ Why?
+
+Limits the number of records locked at a time.
+
+Prevents one pod from locking too many records.
+
+
+
+---
+
+B. Use SKIP LOCKED for Parallel Processing
+
+✅ Modify Query to Avoid Blocking Other Pods
+
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query(value = "SELECT * FROM records WHERE status = 'PENDING' FOR UPDATE SKIP LOCKED LIMIT 100", nativeQuery = true)
+List<Record> findPendingRecords();
+
+✔ Why?
+
+Pods don’t wait for locks, they skip locked records.
+
+Each pod processes unique records.
+
+
+
+---
+
+C. Reduce Lock Duration
+
+✅ Use Short-Lived Transactions
+
+@Transactional(timeout = 30) // Auto-abort if transaction runs > 30s
+public void processBatch() {
+
+✔ Why?
+
+Prevents long locks that block other pods.
+
+
+✅ Commit After Processing Each Record
+Instead of:
+
+for (Record record : records) {
+    record.setStatus("PROCESSING");
+    process(record);
+    record.setStatus("COMPLETED");
+    repository.save(record);
+}
+
+Use:
+
+for (Record record : records) {
+    processSingleRecord(record);
+}
+
+@Transactional
+public void processSingleRecord(Record record) {
+    record.setStatus("PROCESSING");
+    repository.save(record);
+    process(record);
+    record.setStatus("COMPLETED");
+    repository.save(record);
+}
+
+✔ Why?
+
+Commits after each record, reducing lock time.
+
+
+
+---
+
+D. Prevent Deadlocks
+
+✅ Use Ordered Processing
+
+@Query("SELECT r FROM Record r WHERE r.status = 'PENDING' ORDER BY r.id ASC")
+List<Record> findPendingRecords();
+
+✔ Why?
+
+Deadlocks occur when multiple pods lock records in different orders.
+
+Sorting ensures all pods process in the same order.
+
+
+✅ Use a Lower Isolation Level
+
+Instead of SERIALIZABLE, use READ COMMITTED:
+
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        connection:
+          isolation: READ_COMMITTED
+
+✔ Why?
+
+Reduces strict locking, allowing more concurrent processing.
+
+
+
+---
+
+E. Implement Smart Retry Logic
+
+✅ Retry Only on Deadlock or Lock Timeout
+
+@Retryable(
+    value = {PessimisticLockException.class},
+    maxAttempts = 3,
+    backoff = @Backoff(delay = 500))
+
+✔ Why?
+
+Reduces unnecessary retries, preventing system overload.
+
+
+
+---
+
+3. Best Strategy for Your Use Case
+
+
+---
+
+4. Final Recommendation
+
+Since you have multiple pods, I recommend: ✔ Indexing status column
+✔ Using FOR UPDATE SKIP LOCKED LIMIT 100
+✔ Short transactions (@Transactional(timeout = 30))
+✔ Sorting records (ORDER BY id ASC)
+✔ Retrying on deadlocks (@Retryable)
+
+Would you like a full implementation in Spring Boot with all these optimizations?
+
