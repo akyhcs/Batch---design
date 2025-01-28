@@ -1,0 +1,9 @@
+// Step 1: Select Records for Processing
+            String selectQuery = """
+                SELECT id FROM records 
+                WHERE (status = 'PENDING' 
+                    OR (status = 'PROCESSING' AND last_updated_at < SYSTIMESTAMP - INTERVAL '15' MINUTE))
+                ORDER BY created_at 
+                FETCH FIRST 100 ROWS ONLY 
+                FOR UPDATE SKIP LOCKED
+                """;
