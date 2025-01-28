@@ -1,0 +1,142 @@
+Adding Leader Election Configuration in JSONNET for OpenShift Deployment
+
+Since you're using Jsonnet for your OpenShift deployment configuration, you need to modify your Jsonnet templates to include the leader election environment variable and the necessary RBAC permissions.
+
+
+---
+
+1. Updating the Deployment JSONNET
+
+Modify your existing Jsonnet deployment file to enable Leader Election.
+
+Modify Your deployment.jsonnet
+
+local k = import 'ksonnet-lib/ksonnet.beta.4/k8s.libsonnet';
+
+local deployment = k.apps.v1.deployment;
+
+deployment.new(
+  name='batch-job',
+  namespace='my-namespace'
+)
++ deployment.mixin.spec.withReplicas(3)
++ deployment.mixin.spec.template.spec.withContainers([
+  k.container.new('batch-container')
+  + k.container.withImage('my-registry/batch-job:latest')
+  + k.container.withPorts([{ containerPort: 8080 }])
+  + k.container.withEnv([
+    { name: 'SPRING_CLOUD_KUBERNETES_LEADER_LEASE_ENABLED', value: 'true' },
+    { name: 'SPRING_PROFILES_ACTIVE', value: 'openshift' }
+  ])
+])
+
+✔ Adds SPRING_CLOUD_KUBERNETES_LEADER_LEASE_ENABLED=true to enable leader election.
+✔ Ensures only the elected leader pod processes API calls.
+
+
+---
+
+2. Adding RBAC for Leader Election in JSONNET
+
+Leader election in OpenShift requires RBAC permissions to manage Kubernetes Lease API. Add the following Role & RoleBinding in Jsonnet.
+
+Modify Your rbac.jsonnet
+
+local k = import 'ksonnet-lib/ksonnet.beta.4/k8s.libsonnet';
+
+local role = k.rbac.authorization.k8s.io.v1.role;
+
+local roleBinding = k.rbac.authorization.k8s.io.v1.roleBinding;
+
+local namespace = 'my-namespace';
+
+role.new(
+  name='leader-election-role',
+  namespace=namespace
+)
++ role.mixin.withRules([
+  {
+    apiGroups: ['coordination.k8s.io'],
+    resources: ['leases'],
+    verbs: ['get', 'watch', 'create', 'update']
+  }
+])
+
+roleBinding.new(
+  name='leader-election-binding',
+  namespace=namespace
+)
++ roleBinding.mixin.withSubjects([
+  {
+    kind: 'ServiceAccount',
+    name: 'default',
+    namespace: namespace
+  }
+])
++ roleBinding.mixin.withRoleRef({
+  kind: 'Role',
+  name: 'leader-election-role',
+  apiGroup: 'rbac.authorization.k8s.io'
+})
+
+✔ Grants Kubernetes Lease API permissions for leader election.
+✔ Ensures only one pod at a time can be elected as the leader.
+
+
+---
+
+3. Deploying the Updated Jsonnet Configuration
+
+To apply the updated Jsonnet configurations to OpenShift, follow these steps:
+
+Step 1: Generate Kubernetes YAML
+
+Run the following command to convert your Jsonnet to YAML:
+
+jsonnet -J vendor deployment.jsonnet | oc apply -f -
+jsonnet -J vendor rbac.jsonnet | oc apply -f -
+
+✔ This will generate and apply the updated deployment and RBAC configurations.
+
+Step 2: Verify Leader Election
+
+Check which pod is the current leader:
+
+oc get leases -n my-namespace
+
+✔ This should show which pod currently holds the leader lease.
+
+Step 3: Test API Calls
+
+Find the leader pod and test the API:
+
+curl -X POST http://<leader-pod-ip>:8080/batch/trigger
+
+✔ Expected Response:
+
+{
+    "message": "Batch job executed by leader."
+}
+
+Test on a non-leader pod:
+
+curl -X POST http://<non-leader-pod-ip>:8080/batch/trigger
+
+❌ Expected Response:
+
+{
+    "error": "This pod is not the leader. Try another instance."
+}
+
+
+---
+
+4. Final Summary
+
+
+---
+
+Next Steps
+
+Would you like a Jsonnet-based Kubernetes Service that automatically routes API traffic to the leader pod?
+
