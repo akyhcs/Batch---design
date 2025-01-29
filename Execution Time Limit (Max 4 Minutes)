@@ -1,0 +1,139 @@
+Enforcing Step 1 Execution Time Limit (Max 4 Minutes)
+
+If Step 1 should not exceed 4 minutes, we need to: ✅ Track the step's start time.
+✅ Automatically stop the step if it exceeds 4 minutes.
+✅ Log or alert if Step 1 runs beyond the allowed time.
+
+
+---
+
+1. Solution Approach
+
+Store the start time of Step 1 in a database table (step_control).
+
+Periodically check the duration while Step 1 is running.
+
+If the duration exceeds 4 minutes, forcefully terminate the step.
+
+
+
+---
+
+2. Modify the Step Control Table
+
+We need to store the step's start time.
+
+ALTER TABLE step_control ADD COLUMN start_time TIMESTAMP DEFAULT NULL;
+
+✔ This column tracks when Step 1 started.
+
+
+---
+
+3. Modify the Step Control Service
+
+We will: ✅ Store the start time when Step 1 begins.
+✅ Check if the step is running beyond 4 minutes.
+✅ Stop execution if it exceeds the limit.
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+public class StepControlService {
+
+    private final StepControlRepository stepControlRepository;
+
+    public StepControlService(StepControlRepository stepControlRepository) {
+        this.stepControlRepository = stepControlRepository;
+    }
+
+    @Transactional
+    public void startStep1() {
+        Optional<StepControl> step1 = stepControlRepository.findByStepName("STEP_1");
+        if (step1.isPresent()) {
+            step1.get().setStatus("RUNNING");
+            step1.get().setStartTime(LocalDateTime.now());
+        } else {
+            StepControl newStep = new StepControl();
+            newStep.setStepName("STEP_1");
+            newStep.setStatus("RUNNING");
+            newStep.setStartTime(LocalDateTime.now());
+            stepControlRepository.save(newStep);
+        }
+    }
+
+    public boolean isStep1RunningTooLong() {
+        Optional<StepControl> step1 = stepControlRepository.findByStepName("STEP_1");
+        if (step1.isPresent() && "RUNNING".equals(step1.get().getStatus())) {
+            LocalDateTime startTime = step1.get().getStartTime();
+            Duration duration = Duration.between(startTime, LocalDateTime.now());
+            return duration.toMinutes() > 4; // Check if step has exceeded 4 minutes
+        }
+        return false;
+    }
+
+    @Transactional
+    public void completeStep1() {
+        Optional<StepControl> step1 = stepControlRepository.findByStepName("STEP_1");
+        step1.ifPresent(control -> {
+            control.setStatus("COMPLETED");
+            stepControlRepository.save(control);
+        });
+    }
+}
+
+✔ Tracks start time and checks if execution exceeds 4 minutes.
+✔ If the step runs too long, it can be stopped automatically.
+
+
+---
+
+4. Modify Step 1 to Enforce the 4-Minute Limit
+
+Modify Step 1 Tasklet to periodically check the duration and stop if exceeded.
+
+@Bean
+public Tasklet processStep1(StepControlService stepControlService) {
+    return (StepContribution contribution, ChunkContext chunkContext) -> {
+        stepControlService.startStep1(); // Mark Step 1 as Running
+
+        long startTime = System.currentTimeMillis();
+        long maxDuration = 4 * 60 * 1000; // 4 minutes in milliseconds
+
+        while (System.currentTimeMillis() - startTime < maxDuration) {
+            System.out.println("Executing Step 1...");
+
+            // Check every 10 seconds if step is exceeding time limit
+            Thread.sleep(10000); // 10 sec delay
+
+            if (stepControlService.isStep1RunningTooLong()) {
+                System.err.println("Step 1 exceeded 4 minutes! Terminating...");
+                throw new RuntimeException("Step 1 execution time exceeded 4 minutes!");
+            }
+        }
+
+        stepControlService.completeStep1(); // Mark Step 1 as Completed
+        return RepeatStatus.FINISHED;
+    };
+}
+
+✔ Checks execution time every 10 seconds.
+✔ Throws an exception if Step 1 exceeds 4 minutes.
+✔ Ensures Step 1 is forcefully stopped if it runs too long.
+
+
+---
+
+5. Expected Behavior
+
+
+---
+
+6. Next Steps
+
+🚀 Would you like to integrate monitoring (Prometheus, Slack Alerts) for long-running jobs?
+
