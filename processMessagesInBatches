@@ -1,0 +1,38 @@
+public void processMessagesInBatches() {
+    List<Message> batch = new ArrayList<>();
+    int batchSize = 100;
+
+    while (true) {
+        Optional<MessageDTO> optionalMessage = remoteClient.fetchNextMessage();
+        if (optionalMessage.isEmpty()) {
+            break; // Exit loop when System A has no more messages
+        }
+
+        MessageDTO messageDTO = optionalMessage.get();
+        Message message = new Message();
+        message.setMessageId(messageDTO.getId());
+        message.setContent(messageDTO.getContent());
+        message.setStatus(MessageStatus.RECEIVED);
+        batch.add(message);
+
+        if (batch.size() >= batchSize) {
+            saveBatch(batch);
+            batch.clear(); // Clear batch after saving
+        }
+    }
+
+    // Save remaining records if batch is not empty
+    if (!batch.isEmpty()) {
+        saveBatch(batch);
+    }
+}
+
+@Transactional
+public void saveBatch(List<Message> batch) {
+    try {
+        messageRepository.saveAll(batch);
+    } catch (Exception e) {
+        System.err.println("Batch save failed: " + e.getMessage());
+        // Optionally, retry or log individual records
+    }
+}
