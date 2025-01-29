@@ -1,0 +1,130 @@
+Checking If a Job is in Step 1 or Step 2 in Spring Batch
+
+To determine which step a job is currently executing, we can use Spring Batch's JobExplorer API to:
+
+1. Fetch the active job execution.
+
+
+2. Retrieve the last step that was executed.
+
+
+3. Check if the job is in STEP 1 or STEP 2.
+
+
+
+
+---
+
+1. Using JobExplorer to Get Current Step Execution
+
+Spring Batch provides getStepExecutions() which allows us to retrieve step-level execution details.
+
+Service to Check the Current Step of a Running Job
+
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class JobStepTrackingService {
+
+    private final JobExplorer jobExplorer;
+
+    public JobStepTrackingService(JobExplorer jobExplorer) {
+        this.jobExplorer = jobExplorer;
+    }
+
+    public Optional<String> getCurrentStep(Long jobId) {
+        JobExecution jobExecution = jobExplorer.getJobExecution(jobId);
+
+        if (jobExecution == null) {
+            return Optional.empty(); // Job not found
+        }
+
+        List<StepExecution> stepExecutions = jobExecution.getStepExecutions()
+                .stream()
+                .sorted((a, b) -> b.getStartTime().compareTo(a.getStartTime())) // Sort by latest execution
+                .toList();
+
+        if (!stepExecutions.isEmpty()) {
+            StepExecution latestStep = stepExecutions.get(0);
+            return Optional.of(latestStep.getStepName()); // Return current step name
+        }
+
+        return Optional.empty(); // No step executions found
+    }
+}
+
+✔ Fetches the current step of an active job.
+✔ Uses sorting to get the latest step execution (most recent).
+
+
+---
+
+2. Using It in a REST API
+
+You can expose this as an API endpoint to check the current step of a job.
+
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/jobs")
+public class JobTrackingController {
+
+    private final JobStepTrackingService jobStepTrackingService;
+
+    public JobTrackingController(JobStepTrackingService jobStepTrackingService) {
+        this.jobStepTrackingService = jobStepTrackingService;
+    }
+
+    @GetMapping("/{jobId}/current-step")
+    public String getCurrentStep(@PathVariable Long jobId) {
+        return jobStepTrackingService.getCurrentStep(jobId)
+                .orElse("Job ID not found or no steps executed yet.");
+    }
+}
+
+✔ Check a job’s current step by calling
+
+curl -X GET http://localhost:8080/jobs/{jobId}/current-step
+
+✔ Returns the current step name (Step1, Step2, etc.).
+
+
+---
+
+3. Alternative: Find Running Jobs in a Specific Step
+
+If you want to check if any job is currently running a specific step (e.g., "Step 1"), modify the query:
+
+public boolean isStepRunning(String stepName) {
+    List<JobExecution> runningJobs = jobExplorer.findRunningJobExecutions("batchJob");
+
+    for (JobExecution jobExecution : runningJobs) {
+        for (StepExecution stepExecution : jobExecution.getStepExecutions()) {
+            if (stepExecution.getStepName().equals(stepName) && stepExecution.getStatus().isRunning()) {
+                return true; // Step is currently running
+            }
+        }
+    }
+    return false; // Step not found or not running
+}
+
+✔ Checks if Step 1 or Step 2 is currently running in any active job.
+
+
+---
+
+4. Summary
+
+
+---
+
+5. Next Steps
+
+🚀 Would you like to integrate this with logging or alerts when a job is stuck in a specific step?
+
