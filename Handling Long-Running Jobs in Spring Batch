@@ -1,0 +1,163 @@
+Handling Long-Running Jobs in Spring Batch
+
+To detect and handle jobs that are running longer than expected, we need a monitoring and alerting system.
+
+
+---
+
+1. Solution Approach
+
+To track long-running jobs, we will: ✅ Define an "expected duration" for each job.
+✅ Monitor job execution times using the JobExplorer API in Spring Batch.
+✅ Trigger alerts (Slack, Email, or Logs) if a job exceeds its expected time.
+✅ Optionally, terminate or restart long-running jobs if necessary.
+
+
+---
+
+2. Define an Expected Job Duration
+
+For each job, we can define a maximum allowed execution time (e.g., 10 minutes).
+
+Add an Expected Duration Configuration
+
+batch:
+  job:
+    maxExecutionTimeInMinutes: 10  # Define expected duration for jobs
+
+✔ This value will be used for monitoring.
+
+
+---
+
+3. Implement Monitoring with JobExplorer
+
+Spring Batch provides the JobExplorer API to query running jobs.
+We will create a scheduled task that:
+
+1. Checks active jobs.
+
+
+2. Calculates their running time.
+
+
+3. Logs a warning if a job exceeds the expected time.
+
+
+4. Optionally, sends an alert (Slack, Email, etc.).
+
+
+
+Job Monitoring Service
+
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+public class JobMonitoringService {
+
+    private final JobExplorer jobExplorer;
+    private final long maxExecutionTimeInMinutes = 10; // Define expected duration
+
+    public JobMonitoringService(JobExplorer jobExplorer) {
+        this.jobExplorer = jobExplorer;
+    }
+
+    @Scheduled(fixedRate = 300000) // Run every 5 minutes
+    public void checkLongRunningJobs() {
+        List<JobExecution> runningJobs = jobExplorer.findRunningJobExecutions("batchJob");
+
+        for (JobExecution jobExecution : runningJobs) {
+            LocalDateTime startTime = jobExecution.getStartTime().toLocalDateTime();
+            Duration duration = Duration.between(startTime, LocalDateTime.now());
+
+            if (duration.toMinutes() > maxExecutionTimeInMinutes) {
+                System.err.println("WARNING: Job " + jobExecution.getJobId() +
+                        " has been running for " + duration.toMinutes() + " minutes. Expected: " + maxExecutionTimeInMinutes);
+                
+                // Optionally send an alert
+                sendAlert(jobExecution, duration);
+            }
+        }
+    }
+
+    private void sendAlert(JobExecution jobExecution, Duration duration) {
+        // Integrate with Slack, Email, or Logging
+        System.out.println("ALERT: Job " + jobExecution.getJobId() + " is taking too long!");
+    }
+}
+
+✔ Runs every 5 minutes and checks for long-running jobs.
+✔ Logs a warning and triggers an alert if a job exceeds the expected time.
+
+
+---
+
+4. Optionally: Stop or Restart Stuck Jobs
+
+If a job runs too long, we can:
+
+Stop the job manually.
+
+Automatically terminate and restart it.
+
+
+Stop a Long-Running Job
+
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.List;
+
+@Service
+public class JobTerminatorService {
+
+    private final JobExplorer jobExplorer;
+    private final JobRepository jobRepository;
+    private final long maxExecutionTimeInMinutes = 10;
+
+    public JobTerminatorService(JobExplorer jobExplorer, JobRepository jobRepository) {
+        this.jobExplorer = jobExplorer;
+        this.jobRepository = jobRepository;
+    }
+
+    @Transactional
+    public void stopLongRunningJobs() {
+        List<JobExecution> runningJobs = jobExplorer.findRunningJobExecutions("batchJob");
+
+        for (JobExecution jobExecution : runningJobs) {
+            if (jobExecution.getStatus() == BatchStatus.STARTED) {
+                long duration = Duration.between(jobExecution.getStartTime().toLocalDateTime(), LocalDateTime.now()).toMinutes();
+
+                if (duration > maxExecutionTimeInMinutes) {
+                    System.err.println("Stopping job " + jobExecution.getJobId() + " due to excessive runtime.");
+                    jobExecution.setStatus(BatchStatus.STOPPED);
+                    jobRepository.update(jobExecution);
+                }
+            }
+        }
+    }
+}
+
+✔ Detects stuck jobs and stops them automatically.
+
+
+---
+
+5. Summary of Monitoring & Alerting
+
+
+---
+
+6. Next Steps
+
+🚀 Would you like help integrating Slack or Email notifications for job alerts?
+
