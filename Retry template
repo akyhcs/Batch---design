@@ -46,3 +46,37 @@ public class RetryConfig {
         return retryTemplate;
     }
 }
+
+// src/main/java/com/yourpackage/service/MyService.java
+
+package com.yourpackage.service;
+
+import com.yourpackage.domain.Record;
+import com.yourpackage.repository.RecordRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.retry.support.RetryTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+public class MyService {
+
+    @Autowired
+    private RetryTemplate retryTemplate;  // Injecting RetryTemplate for retry logic
+
+    @Autowired
+    private RecordRepository recordRepository;  // Injecting repository to fetch the record
+
+    // Method to fetch a record with retries
+    public Record getRecordById(Long id) {
+        return retryTemplate.execute(context -> {
+            // Retry block
+            System.out.println("Attempting to fetch record with ID: " + id);
+            
+            // Simulating a database call to fetch a record
+            Record record = recordRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Record not found"));
+            
+            return record;  // Return the record if found
+        });
+    }
+}
