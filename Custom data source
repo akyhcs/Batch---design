@@ -1,0 +1,116 @@
+If you can't specify the batch DataSource in the application.properties file, you need to manually configure Spring Batch to use a specific DataSource in your @Configuration class.
+
+
+---
+
+Explicitly Set Batch DataSource in Java Configuration
+
+You can explicitly tell Spring Batch which DataSource to use by overriding the default behavior in a @Configuration class.
+
+1. Define and Register Batch DataSource
+
+@Configuration
+@EnableBatchProcessing
+public class BatchConfig {
+
+    private final DataSource batchDataSource;
+    private final JobRepository jobRepository;
+
+    // Inject the batch data source manually
+    public BatchConfig(@Qualifier("batchDataSource") DataSource batchDataSource, JobRepository jobRepository) {
+        this.batchDataSource = batchDataSource;
+        this.jobRepository = jobRepository;
+    }
+
+    @Bean
+    public JobRepository batchJobRepository() throws Exception {
+        JobRepositoryFactoryBean factoryBean = new JobRepositoryFactoryBean();
+        factoryBean.setDataSource(batchDataSource);
+        factoryBean.setTransactionManager(new ResourcelessTransactionManager());
+        factoryBean.setDatabaseType(DatabaseType.MYSQL.getProductName()); // Change based on DB type
+        return factoryBean.getObject();
+    }
+
+    @Bean
+    public JobLauncher jobLauncher() throws Exception {
+        SimpleJobLauncher jobLauncher = new SimpleJobLauncher();
+        jobLauncher.setJobRepository(batchJobRepository());
+        return jobLauncher;
+    }
+}
+
+@Qualifier("batchDataSource") ensures that Spring uses the batch-specific DataSource instead of the default.
+
+JobRepositoryFactoryBean explicitly sets the DataSource that Spring Batch should use.
+
+
+
+---
+
+2. Define batchDataSource Separately
+
+If you have multiple data sources, you should define a dedicated batch DataSource like this:
+
+@Configuration
+public class DataSourceConfig {
+
+    @Primary
+    @Bean(name = "appDataSource")
+    @ConfigurationProperties(prefix = "spring.datasource")
+    public DataSource appDataSource() {
+        return DataSourceBuilder.create().build();
+    }
+
+    @Bean(name = "batchDataSource")
+    @ConfigurationProperties(prefix = "spring.batch.datasource")
+    public DataSource batchDataSource() {
+        return DataSourceBuilder.create().build();
+    }
+}
+
+
+---
+
+3. Tell Spring Batch to Use the Batch DataSource
+
+In your main Spring Boot class, specify the batch data source explicitly:
+
+@SpringBootApplication
+@EnableBatchProcessing
+public class BatchApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(BatchApplication.class, args);
+    }
+
+    @Bean
+    public BatchConfigurer configurer(@Qualifier("batchDataSource") DataSource batchDataSource) {
+        return new DefaultBatchConfigurer(batchDataSource);
+    }
+}
+
+DefaultBatchConfigurer(batchDataSource) tells Spring Batch not to use the default DataSource.
+
+
+
+---
+
+Key Takeaways
+
+1. Override the default DataSource in BatchConfig.java using JobRepositoryFactoryBean.
+
+
+2. Define multiple data sources explicitly (appDataSource, batchDataSource).
+
+
+3. Tell Spring Batch to use batchDataSource with DefaultBatchConfigurer.
+
+
+
+
+---
+
+This approach ensures that Spring Batch uses the correct database even if you can't define it in application.properties.
+
+Would you like help debugging your specific setup?
+
