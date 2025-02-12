@@ -27,7 +27,8 @@ public class BatchConfig {
         JobRepositoryFactoryBean factoryBean = new JobRepositoryFactoryBean();
         factoryBean.setDataSource(batchDataSource);
         factoryBean.setTransactionManager(new ResourcelessTransactionManager());
-        factoryBean.setDatabaseType(DatabaseType.MYSQL.getProductName()); // Change based on DB type
+        factoryBean.setDatabaseType(DatabaseType.ORACLE.getProductName()); // Change based on DB type
+        factoryBean.setTablePrefix("BATCH_SCHEMA.BATCH_");
         return factoryBean.getObject();
     }
 
