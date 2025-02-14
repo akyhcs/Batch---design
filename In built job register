@@ -70,4 +70,40 @@ Advantages of Using JobRegistry
 ✅ Supports dynamic job retrieval at runtime
 
 Would you like help refactoring your code to use JobRegistry?
+--------------
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.configuration.JobRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
+@SpringBootTest
+public class JobRegistryConfigTest {
+
+    @Autowired
+    private JobRegistry jobRegistry;
+
+    @Test
+    void testJobRegistryExists() {
+        assertNotNull(jobRegistry, "JobRegistry should be available as a bean");
+    }
+
+    @Test
+    void testJobRegistration() throws Exception {
+        // Assuming these jobs are defined in your Spring Batch configuration
+        Job job1 = jobRegistry.getJob("process_warInboundretriever_latestofupdate_job");
+        Job job2 = jobRegistry.getJob("job_two");
+
+        assertNotNull(job1, "Job 'process_warInboundretriever_latestofupdate_job' should be registered");
+        assertNotNull(job2, "Job 'job_two' should be registered");
+    }
+
+    @Test
+    void testInvalidJobLookup() {
+        Exception exception = assertThrows(Exception.class, () -> {
+            jobRegistry.getJob("non_existent_job");
+        });
+        assertTrue(exception.getMessage().contains("No job configuration with the name"));
+    }
+}
