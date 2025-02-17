@@ -1,0 +1,85 @@
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobRestartException;
+import org.springframework.batch.core.repository.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.core.repository.JobParametersInvalidException;
+
+@ExtendWith(MockitoExtension.class)
+public class JobServiceImplTest {
+
+    @InjectMocks
+    private JobServiceImpl jobServiceImpl;
+
+    @Mock
+    private JobLauncher jobLauncher;
+
+    @Mock
+    private BatchUtil batchUtil;
+
+    @Mock
+    private Job job;
+
+    @Mock
+    private Map<String, Job> registry;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(registry.get("testJob")).thenReturn(job);
+    }
+
+    @Test
+    void testTriggerJob_Success() throws Exception {
+        // Arrange
+        Map<String, String> jobParams = new HashMap<>();
+        jobParams.put("param1", "value1");
+
+        JobParameters mockJobParameters = new JobParameters();
+        when(batchUtil.createJobParameters(jobParams)).thenReturn(mockJobParameters);
+        doNothing().when(jobLauncher).run(job, mockJobParameters);
+
+        // Act & Assert
+        assertDoesNotThrow(() -> jobServiceImpl.triggerJob("testJob", jobParams));
+        
+        verify(jobLauncher, times(1)).run(job, mockJobParameters);
+    }
+
+    @Test
+    void testTriggerJob_JobNotFound() {
+        // Act & Assert
+        Exception exception = assertThrows(IllegalArgumentException.class, 
+            () -> jobServiceImpl.triggerJob("unknownJob", new HashMap<>()));
+
+        assertEquals("No job found with name: unknownJob", exception.getMessage());
+    }
+
+    @Test
+    void testTriggerJob_JobLauncherException() throws Exception {
+        // Arrange
+        Map<String, String> jobParams = new HashMap<>();
+        JobParameters mockJobParameters = new JobParameters();
+        when(batchUtil.createJobParameters(jobParams)).thenReturn(mockJobParameters);
+        doThrow(new JobExecutionAlreadyRunningException("Job already running")).when(jobLauncher).run(job, mockJobParameters);
+
+        // Act & Assert
+        Exception exception = assertThrows(Exception.class, 
+            () -> jobServiceImpl.triggerJob("testJob", jobParams));
+
+        assertTrue(exception.getMessage().contains("Failed to execute job"));
+    }
+}
