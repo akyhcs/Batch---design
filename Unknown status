@@ -1,0 +1,55 @@
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.stereotype.Service;
+import java.util.List;
+
+@Service
+public class BatchJobRecoveryService {
+
+    private final JobExplorer jobExplorer;
+    private final JobLauncher jobLauncher;
+    private final JobRepository jobRepository;
+    private final Job job;
+
+    public BatchJobRecoveryService(JobExplorer jobExplorer, JobLauncher jobLauncher, JobRepository jobRepository, Job job) {
+        this.jobExplorer = jobExplorer;
+        this.jobLauncher = jobLauncher;
+        this.jobRepository = jobRepository;
+        this.job = job;
+    }
+
+    public String recoverJobs(String jobName) {
+        List<JobInstance> jobInstances = jobExplorer.getJobInstances(jobName, 0, 5);
+        for (JobInstance jobInstance : jobInstances) {
+            List<JobExecution> executions = jobExplorer.getJobExecutions(jobInstance);
+            for (JobExecution execution : executions) {
+                if (execution.getStatus() == BatchStatus.UNKNOWN) {
+                    System.out.println("Found job with UNKNOWN status: " + execution.getId());
+
+                    // Mark job as FAILED
+                    execution.setStatus(BatchStatus.FAILED);
+                    execution.setExitStatus(new ExitStatus("FORCE_FAILED"));
+                    jobRepository.update(execution);
+
+                    return "Recovered UNKNOWN job: Marked as FAILED. You can restart it manually.";
+                }
+            }
+        }
+        return "No UNKNOWN jobs found.";
+    }
+
+    public String restartJob() {
+        try {
+            JobParameters jobParameters = new JobParametersBuilder()
+                    .addLong("startAt", System.currentTimeMillis()) // Ensure uniqueness
+                    .toJobParameters();
+
+            jobLauncher.run(job, jobParameters);
+            return "Job restarted successfully!";
+        } catch (Exception e) {
+            return "Error restarting job: " + e.getMessage();
+        }
+    }
+}
