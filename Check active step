@@ -1,0 +1,39 @@
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+public class JobStepManagementService {
+
+    private final JobExplorer jobExplorer;
+
+    public JobStepManagementService(JobExplorer jobExplorer) {
+        this.jobExplorer = jobExplorer;
+    }
+
+    // Get the current active step for a running job
+    public String getCurrentStep(String jobName) {
+        List<JobInstance> jobInstances = jobExplorer.getJobInstances(jobName, 0, 1);
+        if (!jobInstances.isEmpty()) {
+            List<JobExecution> jobExecutions = jobExplorer.getJobExecutions(jobInstances.get(0));
+            for (JobExecution execution : jobExecutions) {
+                if (execution.isRunning()) {
+                    for (StepExecution stepExecution : execution.getStepExecutions()) {
+                        if (stepExecution.getStatus() == BatchStatus.STARTED) {
+                            return stepExecution.getStepName(); // Return active step name
+                        }
+                    }
+                }
+            }
+        }
+        return null; // No active step found
+    }
+
+    // Check if job is running and in a specific step before starting a new job
+    public boolean isJobInStep(String jobName, String stepName) {
+        String currentStep = getCurrentStep(jobName);
+        return stepName.equals(currentStep); // Return true if job is in the specified step
+    }
+}
