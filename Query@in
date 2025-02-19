@@ -1,0 +1,50 @@
+Yes, you can use a @Query annotation in Spring Data JPA to fetch records based on a list of IDs 
+in an Oracle database.
+Since Oracle supports the IN clause, you can use it as follows:
+
+
+---
+
+1. Using @Query with IN Clause (Oracle)
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import java.util.List;
+
+public interface MyEntityRepository extends JpaRepository<MyEntity, Long> {
+
+    @Query(value = "SELECT * FROM MY_ENTITY WHERE ID IN (:ids)", nativeQuery = true)
+    List<MyEntity> findByIds(@Param("ids") List<Long> ids);
+}
+
+✅ @Query is using a native SQL query (nativeQuery = true) for Oracle.
+✅ :ids dynamically replaces the list of IDs in the IN clause.
+
+
+---
+
+2. Using WHERE ID IN (:ids) with a List (JPA JPQL)
+
+If you're using JPQL (instead of native SQL), you don't need nativeQuery = true:
+
+@Query("SELECT m FROM MyEntity m WHERE m.id IN :ids")
+List<MyEntity> findByIds(@Param("ids") List<Long> ids);
+
+✅ Uses JPA syntax (SELECT m FROM MyEntity m).
+✅ Works with Hibernate (without using native Oracle SQL).
+
+
+---
+
+3. Handling Large Lists (Oracle IN Clause Limitation)
+
+Oracle limits the IN clause to 1000 elements. If your list is large:
+
+Split the list into batches of 1000 and run multiple queries.
+
+Use TEMPORARY TABLE or JOIN for large datasets.
+
+
+Would you like an example to handle large lists dynamically? 🚀
+
