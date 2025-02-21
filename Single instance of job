@@ -1,0 +1,273 @@
+If you want to ensure only one job runs at a time, preventing multiple concurrent executions of the same job, you can implement Spring Batch locking mechanisms using:
+
+1. JobParameters-based uniqueness
+
+
+2. JobExecutionDecider to check running jobs
+
+
+3. Database locking (JobRepository)
+
+
+4. Using a Singleton Lock Mechanism (Java-based Locking)
+
+
+
+
+---
+
+1. Preventing Concurrent Job Execution Using JobExecutionDecider
+
+The best way to prevent multiple jobs from running at the same time is to check active job executions before starting a new one.
+
+Step 1: Create JobExecutionDecider to Check Active Jobs
+
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionDecider;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.job.flow.FlowExecutionStatus;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class SingleInstanceDecider implements JobExecutionDecider {
+
+    private final JobExplorer jobExplorer;
+
+    public SingleInstanceDecider(JobExplorer jobExplorer) {
+        this.jobExplorer = jobExplorer;
+    }
+
+    @Override
+    public FlowExecutionStatus decide(JobExecution jobExecution, StepExecution stepExecution) {
+        String jobName = jobExecution.getJobInstance().getJobName();
+
+        // Find running instances of the same job
+        List<JobExecution> runningExecutions = jobExplorer.findRunningJobExecutions(jobName);
+
+        if (!runningExecutions.isEmpty()) {
+            System.out.println("🚀 Job '" + jobName + "' is already running. Skipping execution.");
+            return new FlowExecutionStatus("RUNNING"); // Prevent new execution
+        }
+
+        return new FlowExecutionStatus("PROCEED"); // Allow job execution
+    }
+}
+
+✅ If the job is already running, the decider stops execution.
+✅ Ensures only one job instance runs at a time.
+
+
+---
+
+Step 2: Configure Job with Decider
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class SingleInstanceJobConfig {
+
+    private final JobBuilderFactory jobBuilderFactory;
+    private final StepBuilderFactory stepBuilderFactory;
+    private final Step stepOne;
+    private final SingleInstanceDecider jobDecider;
+
+    public SingleInstanceJobConfig(JobBuilderFactory jobBuilderFactory, StepBuilderFactory stepBuilderFactory,
+                                   Step stepOne, SingleInstanceDecider jobDecider) {
+        this.jobBuilderFactory = jobBuilderFactory;
+        this.stepBuilderFactory = stepBuilderFactory;
+        this.stepOne = stepOne;
+        this.jobDecider = jobDecider;
+    }
+
+    @Bean
+    public Job singleInstanceJob() {
+        return jobBuilderFactory.get("singleInstanceJob")
+                .start(jobDecider)  // First, check if a job is already running
+                .on("RUNNING").end() // If "RUNNING", job ends
+                .from(jobDecider).on("PROCEED").to(stepOne) // If "PROCEED", run stepOne
+                .end()
+                .build();
+    }
+}
+
+✅ Prevents duplicate job execution using JobExplorer.
+✅ Stops new jobs if an existing job is still running.
+
+
+---
+
+2. Preventing Multiple Runs Using Unique Job Parameters
+
+Another way to prevent concurrent execution is by enforcing unique job parameters.
+
+Step 1: Launch Job with a Fixed Job Parameter
+
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.stereotype.Service;
+
+@Service
+public class JobRunnerService {
+
+    private final JobLauncher jobLauncher;
+    private final Job singleInstanceJob;
+    private final JobRepository jobRepository;
+
+    public JobRunnerService(JobLauncher jobLauncher, Job singleInstanceJob, JobRepository jobRepository) {
+        this.jobLauncher = jobLauncher;
+        this.singleInstanceJob = singleInstanceJob;
+        this.jobRepository = jobRepository;
+    }
+
+    public void runJob() throws Exception {
+        JobParameters jobParameters = new JobParametersBuilder()
+                .addString("fixedRunId", "singleRun") // Fixed ID prevents duplicate runs
+                .toJobParameters();
+
+        if (jobRepository.getLastJobExecution("singleInstanceJob", jobParameters) != null) {
+            System.out.println("🚀 Job is already running. Skipping execution.");
+            return;
+        }
+
+        jobLauncher.run(singleInstanceJob, jobParameters);
+    }
+}
+
+✅ Prevents duplicate execution using fixed JobParameters.
+✅ If the job is already running, it will not start a new instance.
+
+
+---
+
+3. Using a Database Lock to Prevent Multiple Runs
+
+A database-based locking mechanism can be used to ensure only one job runs.
+
+Step 1: Create a Lock Table in the Database
+
+CREATE TABLE JOB_LOCK (
+    JOB_NAME VARCHAR(255) PRIMARY KEY,
+    LOCK_TIME TIMESTAMP
+);
+
+Step 2: Check and Acquire the Lock Before Running the Job
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import java.sql.Timestamp;
+
+@Service
+public class JobLockService {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public JobLockService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public boolean acquireLock(String jobName) {
+        try {
+            jdbcTemplate.update("INSERT INTO JOB_LOCK (JOB_NAME, LOCK_TIME) VALUES (?, ?)", 
+                jobName, new Timestamp(System.currentTimeMillis()));
+            return true; // Lock acquired
+        } catch (Exception e) {
+            return false; // Lock already exists
+        }
+    }
+
+    public void releaseLock(String jobName) {
+        jdbcTemplate.update("DELETE FROM JOB_LOCK WHERE JOB_NAME = ?", jobName);
+    }
+}
+
+Step 3: Prevent Duplicate Runs in Job Launcher
+
+@Service
+public class JobRunnerWithLock {
+
+    private final JobLauncher jobLauncher;
+    private final Job singleInstanceJob;
+    private final JobLockService jobLockService;
+
+    public JobRunnerWithLock(JobLauncher jobLauncher, Job singleInstanceJob, JobLockService jobLockService) {
+        this.jobLauncher = jobLauncher;
+        this.singleInstanceJob = singleInstanceJob;
+        this.jobLockService = jobLockService;
+    }
+
+    public void runJob() throws Exception {
+        if (!jobLockService.acquireLock("singleInstanceJob")) {
+            System.out.println("🚀 Job is already running. Skipping execution.");
+            return;
+        }
+
+        try {
+            jobLauncher.run(singleInstanceJob, new JobParameters());
+        } finally {
+            jobLockService.releaseLock("singleInstanceJob");
+        }
+    }
+}
+
+✅ Prevents multiple instances at the database level.
+✅ Ensures job runs only if no active lock exists.
+
+
+---
+
+4. Using Java Synchronization to Lock Job Execution
+
+If you don’t want to use a database, you can use a synchronized method to prevent concurrent job execution.
+
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.stereotype.Service;
+
+@Service
+public class SynchronizedJobRunner {
+
+    private final JobLauncher jobLauncher;
+    private final Job singleInstanceJob;
+    private boolean isRunning = false;
+
+    public SynchronizedJobRunner(JobLauncher jobLauncher, Job singleInstanceJob) {
+        this.jobLauncher = jobLauncher;
+        this.singleInstanceJob = singleInstanceJob;
+    }
+
+    public synchronized void runJob() throws Exception {
+        if (isRunning) {
+            System.out.println("🚀 Job is already running. Skipping execution.");
+            return;
+        }
+
+        isRunning = true;
+        try {
+            jobLauncher.run(singleInstanceJob, new JobParameters());
+        } finally {
+            isRunning = false;
+        }
+    }
+}
+
+✅ Uses a simple in-memory lock to prevent concurrent execution.
+✅ Best suited for standalone applications.
+
+
+---
+
+Final Recommendation
+
+Would you like help integrating this into your current Spring Batch setup? 🚀
+
