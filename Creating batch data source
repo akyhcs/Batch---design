@@ -1,0 +1,141 @@
+🔹 Creating a Separate DataSource for Spring Batch
+
+Since Spring Batch and your main application share the same database connection, it is best to define a dedicated DataSource for Spring Batch to prevent connection issues.
+
+
+---
+
+1️⃣ Define a Separate DataSource for Spring Batch in application.yml
+
+Modify application.yml to define two different DataSource configurations:
+
+spring:
+  datasource:
+    url: jdbc:oracle:thin:@localhost:1521:orcl
+    username: myuser
+    password: mypassword
+    driver-class-name: oracle.jdbc.OracleDriver
+
+    hikari:
+      maximum-pool-size: 20  # Main application pool
+      minimum-idle: 5
+      idle-timeout: 60000
+      validation-timeout: 5000
+      leak-detection-threshold: 15000
+      connection-timeout: 30000
+      max-lifetime: 90000
+
+  batch:
+    jdbc:
+      initialize-schema: never  # Prevent batch from initializing tables
+    datasource:
+      url: jdbc:oracle:thin:@localhost:1521:orcl
+      username: myuser
+      password: mypassword
+      driver-class-name: oracle.jdbc.OracleDriver
+      hikari:
+        maximum-pool-size: 10  # Separate connection pool for batch
+        minimum-idle: 2
+        idle-timeout: 60000
+        connection-timeout: 30000
+        max-lifetime: 90000
+
+✅ Prevents Spring Batch from consuming all connections.
+✅ Ensures better isolation of batch transactions.
+
+
+---
+
+2️⃣ Configuring Spring Batch to Use a Separate DataSource
+
+Now, tell Spring Batch to use the batch.datasource instead of the main datasource.
+
+📌 Create a Batch DataSource Configuration Class:
+
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.batch.BatchDataSource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
+@Configuration
+public class BatchDataSourceConfig {
+
+    @Bean
+    @BatchDataSource
+    @Qualifier("batchDataSource") // Marks this as the batch-specific DataSource
+    public DataSource batchDataSource() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+        dataSource.setUrl("jdbc:oracle:thin:@localhost:1521:orcl");
+        dataSource.setUsername("myuser");
+        dataSource.setPassword("mypassword");
+        dataSource.setDriverClassName("oracle.jdbc.OracleDriver");
+        return dataSource;
+    }
+}
+
+✅ Ensures Spring Batch does not use the main application DataSource.
+✅ Prevents batch jobs from affecting live application queries.
+
+
+---
+
+3️⃣ Modify Spring Batch BatchConfigurer to Use the Batch DataSource
+
+Spring Batch automatically uses the primary DataSource, so we need to override it.
+
+📌 Modify BatchConfig.java:
+
+import org.springframework.batch.core.configuration.annotation.BatchConfigurer;
+import org.springframework.batch.core.configuration.annotation.DefaultBatchConfigurer;
+import org.springframework.context.annotation.Configuration;
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+
+@Configuration
+public class BatchConfig extends DefaultBatchConfigurer {
+
+    private final DataSource batchDataSource;
+
+    public BatchConfig(@Qualifier("batchDataSource") DataSource batchDataSource) {
+        this.batchDataSource = batchDataSource;
+    }
+
+    @Override
+    public void setDataSource(DataSource dataSource) {
+        // Prevent Spring Batch from using the default DataSource
+        super.setDataSource(batchDataSource);
+    }
+}
+
+✅ Forces Spring Batch to use the dedicated batchDataSource instead of the default one.
+✅ Ensures batch execution is completely separate from the main app.
+
+
+---
+
+4️⃣ Verify That Spring Batch Uses the New DataSource
+
+Run the following SQL query in your database before and after triggering the batch job:
+
+SELECT * FROM V$SESSION WHERE USERNAME = 'MYUSER';
+
+✅ If batch jobs are using the new DataSource, you should see separate active connections.
+
+
+---
+
+📌 Final Summary: How We Separated Batch DataSource
+
+
+---
+
+🚀 Next Steps
+
+1️⃣ Modify application.yml to define separate batch DataSource.
+2️⃣ Ensure Spring Batch is using the new DataSource (BatchConfig.java).
+3️⃣ Check database sessions (V$SESSION) before and after batch execution.
+
+Would you like help logging batch DataSource activity in real-time? 🚀
+
