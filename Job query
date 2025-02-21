@@ -1,0 +1,81 @@
+To check jobs and steps that still have an UNKNOWN status in the Spring Batch metadata tables, you can run the following SQL queries based on your database.
+
+
+---
+
+🔹 Query to Check Jobs with UNKNOWN Status
+
+SELECT JOB_INSTANCE_ID, JOB_EXECUTION_ID, JOB_NAME, STATUS, START_TIME, END_TIME
+FROM BATCH_JOB_EXECUTION
+WHERE STATUS = 'UNKNOWN';
+
+✅ Finds jobs that are stuck in UNKNOWN status
+✅ Shows job name, start time, and end time for investigation
+
+
+---
+
+🔹 Query to Check Steps with UNKNOWN Status
+
+SELECT STEP_EXECUTION_ID, JOB_EXECUTION_ID, STEP_NAME, STATUS, START_TIME, END_TIME
+FROM BATCH_STEP_EXECUTION
+WHERE STATUS = 'UNKNOWN';
+
+✅ Finds steps that are still UNKNOWN
+✅ Links each step to its corresponding job execution
+
+
+---
+
+🔹 Query to Find UNKNOWN Jobs and Their Steps
+
+SELECT 
+    j.JOB_EXECUTION_ID, j.JOB_NAME, j.STATUS AS JOB_STATUS, 
+    s.STEP_NAME, s.STATUS AS STEP_STATUS, j.START_TIME, j.END_TIME
+FROM BATCH_JOB_EXECUTION j
+JOIN BATCH_STEP_EXECUTION s ON j.JOB_EXECUTION_ID = s.JOB_EXECUTION_ID
+WHERE j.STATUS = 'UNKNOWN' OR s.STATUS = 'UNKNOWN';
+
+✅ Finds all jobs and steps that are UNKNOWN in one query.
+✅ Shows the job and step details together.
+
+
+---
+
+🔹 Query to Get Latest Job Runs (Debugging)
+
+If you want to check the last executed jobs, use:
+
+SELECT JOB_EXECUTION_ID, JOB_NAME, STATUS, START_TIME, END_TIME
+FROM BATCH_JOB_EXECUTION
+ORDER BY START_TIME DESC
+LIMIT 5;
+
+✅ Lists the last 5 executed jobs to track failures.
+
+
+---
+
+🔹 If You Want to Fix It Manually
+
+If you find UNKNOWN jobs and want to mark them as FAILED manually, use:
+
+UPDATE BATCH_JOB_EXECUTION
+SET STATUS = 'FAILED'
+WHERE STATUS = 'UNKNOWN';
+
+And for steps:
+
+UPDATE BATCH_STEP_EXECUTION
+SET STATUS = 'FAILED'
+WHERE STATUS = 'UNKNOWN';
+
+✅ Ensures UNKNOWN jobs and steps don't block new executions.
+
+
+---
+
+📌 Summary
+
+Would you like an automated Spring Batch script to clean up UNKNOWN statuses before job execution? 🚀
+
