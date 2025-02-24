@@ -1,0 +1,307 @@
+From the screenshot, it looks like there’s a transaction-related error, which often arises when Spring can’t find or use the correct PlatformTransactionManager. In a multi-DataSource or custom Batch configuration scenario, you can run into issues where:
+
+1. Multiple transaction managers exist, and Spring doesn’t know which one to use.
+
+
+2. No transaction manager is found for a specific DataSource.
+
+
+3. The wrong transaction manager is injected for JPA or Spring Batch.
+
+
+
+Below is a step-by-step guide to help you resolve the most common transaction manager conflicts, especially in the context of having two DataSources (one for JPA and one for Batch).
+
+
+---
+
+1. Confirm You Have the Correct Transaction Manager Beans
+
+Typically, you need two different transaction managers if you have two distinct DataSources:
+
+1. JPA Transaction Manager (bound to your JPA EntityManagerFactory / application DataSource)
+
+
+2. Batch Transaction Manager (if you are configuring a custom BatchConfigurer)
+
+
+
+Example: JPA Transaction Manager
+
+In your JPA config, you might have something like:
+
+@Configuration
+@EnableJpaRepositories(
+    basePackages = "com.example.repository",
+    entityManagerFactoryRef = "applicationEntityManagerFactory",
+    transactionManagerRef = "applicationTransactionManager"
+)
+public class JpaConfig {
+
+    @Bean(name = "applicationEntityManagerFactory")
+    public LocalContainerEntityManagerFactoryBean applicationEntityManagerFactory(
+            EntityManagerFactoryBuilder builder,
+            @Qualifier("applicationDataSource") DataSource dataSource) {
+        return builder
+                .dataSource(dataSource)
+                .packages("com.example.entity")
+                .persistenceUnit("application")
+                .build();
+    }
+
+    @Bean(name = "applicationTransactionManager")
+    public PlatformTransactionManager applicationTransactionManager(
+            @Qualifier("applicationEntityManagerFactory") EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
+    }
+}
+
+Here, applicationTransactionManager handles all JPA-related transactions for the applicationDataSource.
+
+Example: Batch Transaction Manager
+
+If you’ve implemented a custom BatchConfigurer for Spring Batch, you might do:
+
+@Configuration
+public class CustomBatchConfigurer implements BatchConfigurer {
+
+    private final DataSource batchDataSource;
+
+    // You can either reuse the JPA transaction manager if the DB is the same
+    // or define a separate one if the batch DB is different or you want isolation
+    private final PlatformTransactionManager batchTransactionManager;
+
+    public CustomBatchConfigurer(
+            @Qualifier("batchDataSource") DataSource batchDataSource,
+            PlatformTransactionManager batchTransactionManager) {
+        this.batchDataSource = batchDataSource;
+        this.batchTransactionManager = batchTransactionManager;
+    }
+
+    @Override
+    public JobRepository getJobRepository() throws Exception {
+        JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+        factory.setDataSource(batchDataSource);
+        factory.setTransactionManager(batchTransactionManager); // Must set
+        factory.afterPropertiesSet();
+        return factory.getObject();
+    }
+
+    @Override
+    public PlatformTransactionManager getTransactionManager() {
+        return batchTransactionManager;
+    }
+
+    // ... getJobLauncher(), getJobExplorer() ...
+}
+
+In this scenario, the batchTransactionManager might be:
+
+@Bean(name = "batchTransactionManager")
+public PlatformTransactionManager batchTransactionManager(
+        @Qualifier("batchDataSource") DataSource batchDataSource) {
+    // For a purely JDBC-based batch DB, you might use DataSourceTransactionManager
+    return new DataSourceTransactionManager(batchDataSource);
+}
+
+Or, if you’re storing batch metadata in the same database as JPA (less common, but possible), you could reuse the same transaction manager—though typically you’d still reference it explicitly.
+
+
+---
+
+2. Mark the Correct Transaction Manager as @Primary (If Needed)
+
+If you only have one transaction manager in your application, you can mark it with @Primary to ensure that any @Transactional method (without a qualifier) uses that manager by default.
+
+When you have two transaction managers, typically you’ll have:
+
+JPA transaction manager: Marked as @Primary if most of your @Transactional usage is for JPA.
+
+Batch transaction manager: Referenced explicitly in the BatchConfigurer.
+
+
+
+---
+
+3. Check for Conflicts or Missing Beans
+
+Missing Bean: If the error says something like "No qualifying bean of type 'PlatformTransactionManager' available", it means Spring can’t find any transaction manager bean for your scenario. Ensure you actually create a bean (like applicationTransactionManager or batchTransactionManager) for each data source.
+
+Multiple Beans, No Primary: If you see something like "NoUniqueBeanDefinitionException: No qualifying bean of type 'PlatformTransactionManager' because 2 were found and none is marked as primary", you need to mark one as @Primary or explicitly qualify your injection.
+
+
+
+---
+
+4. Inspect Your Logs & Debug
+
+Enable Debug Logging: In application.properties:
+
+logging.level.org.springframework.transaction=DEBUG
+logging.level.org.springframework.orm.jpa=DEBUG
+logging.level.org.springframework.batch=DEBUG
+
+This can show you which transaction manager is being chosen at runtime.
+
+Use a Bean Checker: You can create a small component to list all PlatformTransactionManager beans at startup:
+
+@Component
+public class TransactionManagerChecker {
+    @Autowired
+    private ApplicationContext applicationContext;
+
+    @PostConstruct
+    public void checkBeans() {
+        String[] tms = applicationContext.getBeanNamesForType(PlatformTransactionManager.class);
+        System.out.println("Available TransactionManagers: " + Arrays.toString(tms));
+    }
+}
+
+This helps confirm which transaction managers exist in the context (and how many).
+
+
+
+---
+
+5. Typical Causes of TransactionManager Errors
+
+1. Forgetting to define a transaction manager for a second DataSource.
+
+
+2. Having two transaction managers but not marking one as @Primary or not using qualifiers.
+
+
+3. Relying on auto-configuration that is overridden or disabled.
+
+
+4. Using JPA but only defining a DataSourceTransactionManager (or vice versa). For JPA, you usually need a JpaTransactionManager.
+
+
+5. Custom BatchConfigurer sets a transaction manager that’s not actually defined or autowired properly.
+
+
+
+
+---
+
+6. Example: Two DataSources, Two TransactionManagers
+
+Application DataSource + JPA
+
+@Configuration
+@EnableJpaRepositories(
+    basePackages = "com.example.repo",
+    entityManagerFactoryRef = "applicationEntityManagerFactory",
+    transactionManagerRef = "applicationTransactionManager"
+)
+public class JpaConfig {
+
+    @Bean
+    @Primary
+    @ConfigurationProperties("spring.datasource")
+    public DataSource applicationDataSource() {
+        return DataSourceBuilder.create().build();
+    }
+
+    @Bean
+    @Primary
+    public LocalContainerEntityManagerFactoryBean applicationEntityManagerFactory(
+            EntityManagerFactoryBuilder builder,
+            @Qualifier("applicationDataSource") DataSource dataSource) {
+        return builder
+                .dataSource(dataSource)
+                .packages("com.example.entity")
+                .persistenceUnit("application")
+                .build();
+    }
+
+    @Bean
+    @Primary
+    public PlatformTransactionManager applicationTransactionManager(
+            @Qualifier("applicationEntityManagerFactory") EntityManagerFactory emf) {
+        return new JpaTransactionManager(emf);
+    }
+}
+
+Batch DataSource + Batch Transaction Manager
+
+@Configuration
+public class BatchDataSourceConfig {
+
+    @Bean
+    @ConfigurationProperties("spring.batch-datasource")
+    public DataSource batchDataSource() {
+        return DataSourceBuilder.create().build();
+    }
+
+    @Bean(name = "batchTransactionManager")
+    public PlatformTransactionManager batchTransactionManager(
+            @Qualifier("batchDataSource") DataSource dataSource) {
+        // For purely JDBC-based batch, DataSourceTransactionManager is fine
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+
+Custom BatchConfigurer
+
+@Configuration
+public class CustomBatchConfigurer implements BatchConfigurer {
+
+    private final DataSource batchDataSource;
+    private final PlatformTransactionManager batchTransactionManager;
+
+    public CustomBatchConfigurer(
+            @Qualifier("batchDataSource") DataSource batchDataSource,
+            @Qualifier("batchTransactionManager") PlatformTransactionManager batchTransactionManager) {
+        this.batchDataSource = batchDataSource;
+        this.batchTransactionManager = batchTransactionManager;
+    }
+
+    @Override
+    public JobRepository getJobRepository() throws Exception {
+        JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+        factory.setDataSource(batchDataSource);
+        factory.setTransactionManager(batchTransactionManager);
+        factory.afterPropertiesSet();
+        return factory.getObject();
+    }
+
+    @Override
+    public PlatformTransactionManager getTransactionManager() {
+        return batchTransactionManager;
+    }
+
+    // getJobLauncher(), getJobExplorer() ...
+}
+
+
+---
+
+Conclusion
+
+Transaction manager issues typically stem from:
+
+Having multiple transaction managers without specifying which one to use (via @Primary or qualifiers).
+
+Having none defined or letting auto-configuration pick incorrectly.
+
+Mixing up JPA vs. JDBC transaction managers.
+
+
+Action Items:
+
+1. Ensure you define both a JPA transaction manager and a Batch transaction manager (if using separate DataSources).
+
+
+2. Mark the JPA transaction manager as @Primary if that’s the one used by most @Transactional calls in your code.
+
+
+3. In your BatchConfigurer, explicitly set the PlatformTransactionManager that should be used for batch operations.
+
+
+4. Check your logs or use a Bean Checker to confirm the correct beans are in place.
+
+
+
+If you follow these steps and align your DataSources + transaction managers accordingly, you should resolve transaction-related errors in a multi-DataSource environment with Spring Batch and JPA.
+
