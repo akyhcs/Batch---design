@@ -1,0 +1,115 @@
+Can We Store Thread Data When a Spring Batch Job is Launched?
+
+Yes! You can store and retrieve thread-related data when a Spring Batch job is launched using JobExecutionContext,
+StepExecutionContext, or ThreadLocal variables.
+
+
+---
+
+✅ 1️⃣ Store Data in JobExecutionContext (Persistent Across Steps)
+
+If you want to store thread-specific data at the job level and access it in any step, use JobExecutionContext.
+
+🔹 Storing Data When Job Starts
+
+Modify your job launcher or tasklet to store thread-related data when the job starts.
+
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+    JobExecution jobExecution = chunkContext.getStepContext().getStepExecution().getJobExecution();
+
+    // Store thread ID in JobExecutionContext
+    jobExecution.getExecutionContext().put("threadId", Thread.currentThread().getId());
+    jobExecution.getExecutionContext().put("threadName", Thread.currentThread().getName());
+
+    System.out.println("Stored thread data: " + Thread.currentThread().getId());
+
+    return RepeatStatus.FINISHED;
+}
+
+🔹 Retrieving Thread Data in Another Step
+
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+    JobExecution jobExecution = chunkContext.getStepContext().getStepExecution().getJobExecution();
+
+    Long threadId = jobExecution.getExecutionContext().getLong("threadId");
+    String threadName = jobExecution.getExecutionContext().getString("threadName");
+
+    System.out.println("Retrieved Thread ID: " + threadId);
+    System.out.println("Retrieved Thread Name: " + threadName);
+
+    return RepeatStatus.FINISHED;
+}
+
+✅ Use When: You need to store thread info at the job level and access it later in the job.
+❌ Not Useful For: Storing per-step thread data.
+
+
+---
+
+✅ 2️⃣ Store Data in StepExecutionContext (Persistent Within a Step)
+
+If you need to store thread-related data for each step, use StepExecutionContext.
+
+🔹 Store Thread Data in Step Context
+
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+    StepExecution stepExecution = chunkContext.getStepContext().getStepExecution();
+
+    stepExecution.getExecutionContext().put("stepThreadId", Thread.currentThread().getId());
+    stepExecution.getExecutionContext().put("stepThreadName", Thread.currentThread().getName());
+
+    return RepeatStatus.FINISHED;
+}
+
+🔹 Retrieve Thread Data in Another Step
+
+Long stepThreadId = stepExecution.getExecutionContext().getLong("stepThreadId");
+String stepThreadName = stepExecution.getExecutionContext().getString("stepThreadName");
+
+System.out.println("Step Thread ID: " + stepThreadId);
+System.out.println("Step Thread Name: " + stepThreadName);
+
+✅ Use When: You need to track thread usage within a specific step.
+
+
+---
+
+✅ 3️⃣ Store Data in ThreadLocal (Specific to a Running Thread)
+
+If you want to store data only for the currently running thread, use ThreadLocal.
+
+🔹 Store Thread Data Using ThreadLocal
+
+public class ThreadContext {
+    private static final ThreadLocal<Long> threadId = ThreadLocal.withInitial(() -> Thread.currentThread().getId());
+
+    public static Long getThreadId() {
+        return threadId.get();
+    }
+
+    public static void remove() {
+        threadId.remove();
+    }
+}
+
+🔹 Use ThreadLocal in the Job
+
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+    System.out.println("Thread ID (Stored): " + ThreadContext.getThreadId());
+    return RepeatStatus.FINISHED;
+}
+
+✅ Use When: You need thread-specific data that disappears after the thread completes.
+❌ Not Persistent: Data is lost when the thread finishes.
+
+
+---
+
+🔹 Summary: Best Method for Storing Thread Data
+
+Would you like help implementing this in your job? 🚀
+
