@@ -1,0 +1,25 @@
+@Component
+public class MyTasklet implements Tasklet {
+
+    @Autowired
+    private MyBusinessService businessService;
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+        JobExecution jobExecution = chunkContext.getStepContext().getStepExecution().getJobExecution();
+
+        // If stop is requested, exit immediately
+        if (jobExecution.isStopping() || Thread.currentThread().isInterrupted()) {
+            System.out.println("Job is stopping, exiting step...");
+            return RepeatStatus.FINISHED;
+        }
+
+        try {
+            businessService.processBusinessLogic();  // Call the business logic
+        } catch (Exception e) {
+            throw new RuntimeException("Error executing business logic", e);
+        }
+
+        return RepeatStatus.FINISHED; // Tasklet runs only once
+    }
+}
