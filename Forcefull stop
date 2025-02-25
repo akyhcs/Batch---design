@@ -23,3 +23,105 @@ public class MyTasklet implements Tasklet {
         return RepeatStatus.FINISHED; // Tasklet runs only once
     }
 }
+Once the business logic (businessService.processBusinessLogic()) starts executing, the control flow will not return to the if condition at the top unless the business logic itself actively checks for stop signals.
+
+🔹 Why?
+
+The if (jobExecution.isStopping() || Thread.currentThread().isInterrupted()) only checks the stop signal once before starting the business logic.
+
+If the business logic runs for a long time (e.g., processing a large dataset or looping over records), it won’t stop until it completes naturally or throws an exception.
+
+Solution: The business logic itself must periodically check for stop signals.
+
+
+
+---
+
+✅ Solution: Modify Business Logic to Respect Stop Requests
+
+Modify the processBusinessLogic() method in MyBusinessService to check for interruptions during execution.
+
+🔹 Example: Add Stop Check in Business Logic
+
+@Service
+public class MyBusinessService {
+
+    public void processBusinessLogic() {
+        System.out.println("Executing business logic...");
+
+        for (int i = 0; i < 10; i++) {  // Simulating work in iterations
+            if (Thread.currentThread().isInterrupted()) {
+                System.out.println("Business logic interrupted, stopping execution...");
+                return; // Gracefully exit
+            }
+
+            try {
+                System.out.println("Processing batch " + (i + 1));
+                Thread.sleep(2000); // Simulate processing time
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();  // Preserve interrupt flag
+                System.out.println("Business logic interrupted during sleep.");
+                return;
+            }
+        }
+
+        System.out.println("Business logic completed.");
+    }
+}
+
+🔹 Why This Works
+
+✔ Periodically checks Thread.currentThread().isInterrupted() inside a loop.
+✔ Stops execution immediately when an interrupt request is detected.
+✔ Handles InterruptedException properly to avoid ignoring the stop signal.
+
+
+---
+
+✅ Alternative: Throw Exception on Interrupt
+
+If you prefer to fail fast instead of returning, throw a custom exception.
+
+public void processBusinessLogic() {
+    System.out.println("Executing business logic...");
+
+    for (int i = 0; i < 10; i++) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new JobInterruptedException("Business logic interrupted, stopping job.");
+        }
+
+        try {
+            System.out.println("Processing batch " + (i + 1));
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new JobInterruptedException("Business logic interrupted during sleep.", e);
+        }
+    }
+
+    System.out.println("Business logic completed.");
+}
+
+🔹 Effect:
+✔ Ensures the batch job fails immediately when stopped.
+✔ Spring Batch will catch JobInterruptedException and stop execution.
+
+
+---
+
+✅ Summary: How to Ensure Stop Requests Work
+
+
+---
+
+🚀 Final Answer
+
+The control flow does not go back to if in Tasklet once businessService.processBusinessLogic() starts.
+
+Solution: Modify processBusinessLogic() to periodically check Thread.currentThread().isInterrupted().
+
+If the job is stopped, gracefully exit or throw an exception to ensure it doesn’t continue running.
+
+
+Would you like help debugging a stuck job in your case? 🚀
+
