@@ -1,0 +1,121 @@
+Why Are Database Changes Not Reflecting When a Step Fails?
+
+This issue occurs due to Spring Batch’s transaction management, which rolls back the transaction when a step fails. If your step performs database updates, they will be reverted on failure unless explicitly committed.
+
+
+---
+
+🔹 1. Understanding Why DB Changes Are Not Persisted
+
+Spring Batch uses transactions for each step execution.
+
+If a step fails, the entire transaction is rolled back.
+
+Any database changes inside the step are lost unless committed.
+
+
+
+---
+
+✅ 2. Solution: Use PROPAGATION_REQUIRES_NEW to Force Commit
+
+If you want database changes to persist even when the step fails, you need to use a separate transaction.
+
+🔹 Modify Your Service Layer
+
+Mark the service method that updates the database with PROPAGATION_REQUIRES_NEW, which ensures that it commits changes immediately before the step fails.
+
+@Service
+public class MyBusinessService {
+
+    @Autowired
+    private MyRepository myRepository;
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateDatabase(String data) {
+        myRepository.save(new MyEntity(data));
+        System.out.println("Database updated successfully.");
+    }
+}
+
+✔ This ensures the database update is committed even if the step later fails.
+❌ Without this, the transaction is rolled back when the step fails.
+
+
+---
+
+✅ 3. Solution: Use @Transactional with noRollbackFor
+
+If your step fails but you want database changes to persist, you can disable rollback for specific exceptions.
+
+🔹 Modify Transaction Settings
+
+@Transactional(noRollbackFor = { CustomBusinessException.class })
+public void updateDatabase() {
+    myRepository.save(new MyEntity("data"));
+}
+
+✔ Ensures that changes persist even if a specific exception occurs.
+✔ Useful when some errors should not trigger a rollback.
+
+
+---
+
+✅ 4. Solution: Commit Changes in Smaller Chunks
+
+Spring Batch commits database changes only at the end of a step, so if a failure occurs, everything is rolled back.
+To ensure some changes persist, use chunk-based commits.
+
+🔹 Example: Commit Every 10 Records
+
+@Bean
+public Step myStep(StepBuilderFactory stepBuilderFactory, ItemReader<MyData> reader, 
+                   ItemProcessor<MyData, ProcessedData> processor, ItemWriter<ProcessedData> writer) {
+    return stepBuilderFactory.get("myStep")
+            .<MyData, ProcessedData>chunk(10)  // Commits every 10 records
+            .reader(reader)
+            .processor(processor)
+            .writer(writer)
+            .build();
+}
+
+✔ Ensures that every 10 records are committed separately before failure occurs.
+✔ Minimizes data loss if a step fails.
+
+
+---
+
+✅ 5. Solution: Manually Commit Changes Before Failure
+
+If you need to force a commit before a failure, use entityManager.flush().
+
+🔹 Example: Flush Database Changes Before Step Fails
+
+@Autowired
+private EntityManager entityManager;
+
+public void updateDatabase() {
+    MyEntity entity = new MyEntity("data");
+    entityManager.persist(entity);
+    entityManager.flush(); // Force commit changes before step failure
+}
+
+✔ Ensures changes are written to the database immediately.
+
+
+---
+
+🔹 Summary: How to Ensure DB Changes Persist When a Step Fails
+
+
+---
+
+🚀 Final Answer
+
+✔ Use @Transactional(propagation = Propagation.REQUIRES_NEW) to commit changes independently.
+✔ Use chunk processing to persist changes before a step fails.
+✔ Use noRollbackFor if you want some errors to avoid rollbacks.
+✔ Manually call flush() if needed before failure.
+
+Would you like help debugging your step execution? 🚀
+
