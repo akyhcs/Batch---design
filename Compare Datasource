@@ -1,0 +1,39 @@
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import java.sql.Connection;
+
+@Component
+public class DataSourceDebugger implements CommandLineRunner {
+
+    private final DataSource defaultDataSource;
+    private final DataSource customDataSource;
+
+    public DataSourceDebugger(
+        @Qualifier("defaultDataSource") DataSource defaultDataSource,
+        @Qualifier("customDataSource") DataSource customDataSource) {
+        this.defaultDataSource = defaultDataSource;
+        this.customDataSource = customDataSource;
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        System.out.println("🔹 Default DataSource: " + defaultDataSource);
+        System.out.println("🔹 Custom DataSource: " + customDataSource);
+
+        try (Connection conn1 = defaultDataSource.getConnection();
+             Connection conn2 = customDataSource.getConnection()) {
+
+            System.out.println("✅ Default DataSource - AutoCommit: " + conn1.getAutoCommit());
+            System.out.println("✅ Custom DataSource - AutoCommit: " + conn2.getAutoCommit());
+
+            System.out.println("✅ Default DataSource - Schema: " + conn1.getSchema());
+            System.out.println("✅ Custom DataSource - Schema: " + conn2.getSchema());
+
+            System.out.println("✅ Default DataSource - Isolation: " + conn1.getTransactionIsolation());
+            System.out.println("✅ Custom DataSource - Isolation: " + conn2.getTransactionIsolation());
+        }
+    }
+}
